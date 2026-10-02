@@ -1,0 +1,7 @@
+{
+  "name": "tsl-psc-system",
+  "version": "1.1.0",
+  "private": true,
+  "description": "TSL PSC System — GitHub Pages front-end + Google Apps Script backend",
+  "scripts": { "test": "node tests/core_test.js && node tests/gas_test.js" }
+}

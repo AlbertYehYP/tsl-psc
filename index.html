@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TSL PSC 系統</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="assets/app.css">
+<style>:root{color-scheme:light}body{margin:0}[hidden]{display:none!important}</style>
+</head>
+<body>
+<!--APP-->
+<div class="wrap" id="app">
+  <header class="mast">
+    <div>
+      <div class="eyebrow" id="org">德翔海技 TSL MARTEC · Port State Control</div>
+      <h1>TSL PSC 系統</h1>
+      <div class="meta">
+        <span>資料截至 <b id="m-asof" class="num">—</b></span>
+      </div>
+    </div>
+    <div class="userbox" id="userbox"></div>
+  </header>
+  <div id="demo-bar" hidden></div>
+
+  <nav class="sections" role="tablist" aria-label="主要分類" id="sections">
+    <button class="sec" role="tab" type="button" data-sec="inc"><b>事故管理</b><small id="m-inc">—</small></button>
+    <button class="sec" role="tab" type="button" data-sec="psc"><b>PSC 檢查</b><small id="m-psc">—</small></button>
+    <button class="sec admin" role="tab" type="button" data-sec="admin" id="sec-admin" hidden><b>系統管理</b><small>使用者 · 對照表 · 匯入</small></button>
+  </nav>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+
+  <section class="filters" aria-label="篩選" id="filters">
+    <div class="yrs" id="f-years"></div>
+    <select class="sel" id="f-mgmt" aria-label="管理公司"></select>
+    <select class="sel" id="f-vessel" aria-label="船舶"></select>
+    <select class="sel" id="f-mou" aria-label="MOU 區域"></select>
+    <select class="sel" id="f-country" aria-label="港口國"></select>
+    <select class="sel" id="f-cat" aria-label="缺失類別"></select>
+    <input class="search" id="f-q" type="search" placeholder="搜尋缺失內容、代碼、港口、案件編號…" aria-label="關鍵字">
+    <button class="btn ghost" id="f-clear" type="button">清除篩選</button>
+    <div class="fnote" id="f-note"></div>
+  </section>
+
+  <main id="view"></main>
+</div>
+<div class="tip" id="tip"></div>
+<div class="toast" id="toast" role="status"></div>
+<script src="config.js"></script>
+<script src="assets/core.js"></script>
+<script src="assets/app.js"></script>
+<!--/APP-->
+</body>
+</html>
