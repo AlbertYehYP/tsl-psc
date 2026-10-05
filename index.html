@@ -3,25 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>TSL PSC 系統</title>
+<title>TSL 船隊事故追蹤系統</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="assets/app.css">
-<style>:root{color-scheme:light}body{margin:0}[hidden]{display:none!important}</style>
+<style>body{margin:0}[hidden]{display:none!important}</style>
+<script>try{var t=localStorage.getItem("tsl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 </head>
 <body>
 <!--APP-->
 <div class="wrap" id="app">
   <header class="mast">
     <div>
-      <div class="eyebrow" id="org">德翔海技 TSL MARTEC · Port State Control</div>
-      <h1>TSL PSC 系統</h1>
+      <div class="eyebrow" id="org">德翔海技 TSL MARTEC · Fleet Incident &amp; PSC</div>
+      <h1 id="sysname">TSL 船隊事故追蹤系統</h1>
       <div class="meta">
         <span>資料截至 <b id="m-asof" class="num">—</b></span>
       </div>
     </div>
-    <div class="userbox" id="userbox"></div>
+    <div class="mast-right"><div class="userbox" id="userbox"></div><div class="themes" id="themes" aria-label="配色"></div></div>
   </header>
   <div id="demo-bar" hidden></div>
 
@@ -48,6 +49,7 @@
 </div>
 <div class="tip" id="tip"></div>
 <div class="toast" id="toast" role="status"></div>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 <script src="config.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/app.js"></script>

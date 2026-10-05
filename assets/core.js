@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.1.0';
+  var VERSION = '1.2.0';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -46,7 +46,7 @@ var PSC = (function () {
     { code: 'OTH', name: '其他' }
   ];
   var COMPANY_TO_MGMT = { FLEET: 'FLEET', VSHIPS: 'V-SHIP', BSM: 'BSM', TSL: 'SELF', TEH: 'SELF' };
-  var STATUS = { OPEN: '進行中', CLOSED: '已完成', NIL: 'NIL', HIST: '歷史資料', MISSING: '未立案' };
+  var STATUS = { OPEN: '進行中', CLOSED: '已完成', NIL: 'NIL', HIST: '歷史資料', MISSING: '未立案', VOID: '作廢' };
 
   /* ---------------- PSC regimes (MOU) ---------------- */
   var TOKYO = 'Tokyo MOU';
@@ -110,6 +110,154 @@ var PSC = (function () {
     if (m && m !== 'V') return up(m) === up(TOKYO);
     return (members || []).indexOf(normCountry(insp.country)) >= 0;
   }
+  /* ---------------- incident rules (3-TSTB-VSL-P002 第 2 版) — editable in the Rules sheet ----------------
+   * 規範不寫死：通報分級與時限、4.1 重大事件分級、事故性質代碼、參數都存在 Rules 分頁，
+   * 依 valid_from 分版本；每件事故依「事故日期當時有效」的規範計算。Rules 分頁空白時才用下面的預設值。 */
+  var RULESET_DEFAULT = 'P002 第 2 版（草稿）';
+  var DEFAULT_RULES = [
+    { kind: 'tier', code: '1', name: '第一級', name_en: 'Tier 1 - Major', flash_h: '2', initial_h: '24', progress_d: '7', rca_d: '14', criteria: '人員死亡、船舶全損、重大污染、擱淺、碰撞，或主機失效致影響航行安全', ref: '4.2.1、6.4.2、附件 8.3' },
+    { kind: 'tier', code: '2', name: '第二級', name_en: 'Tier 2 - Moderate', flash_h: '2', initial_h: '24', progress_d: '7', rca_d: '14', criteria: '人員嚴重傷害、重要設備故障、港口國管制扣船、輕微污染或港口罰款', ref: '4.2.2、6.4.2、附件 8.3' },
+    { kind: 'tier', code: '3', name: '第三級', name_en: 'Tier 3 - Minor', flash_h: '12', initial_h: '48', progress_d: '', rca_d: '21', criteria: '輕微傷害、一般設備故障、虛驚事件（Near Miss）或港口國管制缺失', ref: '4.2.3、6.4.2、附件 8.3' },
+    { kind: 'major', code: '1', name: '一級狀況', ert_chair: '總經理', min_tier: '1', loss_usd_min: '1000000', deaths_min: '3', criteria: '海損約 100 萬美金以上或死亡 3 人以上；船隻被盜匪劫持；危險品災害或海洋污染擴大到海洋且難以控制', ref: '4.1.1、4.2.4' },
+    { kind: 'major', code: '2', name: '二級狀況', ert_chair: '督導副總', min_tier: '2', loss_usd_min: '500000', deaths_min: '1', criteria: '海損約 50–100 萬美金或死亡 1–3 人；船隻遭盜匪攻擊有財產損失或人員傷亡；污染擴大到海洋但已即時控制', ref: '4.1.2、4.2.4' },
+    { kind: 'major', code: '3', name: '三級狀況', ert_chair: '船務部主管', min_tier: '3', delay_h_min: '48', injury_min: '1', criteria: '海損約 50 萬美金以下且延誤船期 48 小時以上，或有人受傷；曾遭盜匪攻擊無損失；污染在船上已控制', ref: '4.1.3、4.2.4' },
+    { kind: 'type', code: 'M', name: '機械', name_en: 'Machinery', criteria: '主機、輔機、推進系統故障', ref: '4.3' },
+    { kind: 'type', code: 'N', name: '航行', name_en: 'Navigation', criteria: '碰撞、擱淺、航行設備故障', ref: '4.3' },
+    { kind: 'type', code: 'C', name: '貨物', name_en: 'Cargo', criteria: '貨損、貨差、繫固問題', ref: '4.3' },
+    { kind: 'type', code: 'P', name: '人員', name_en: 'Personnel', criteria: '工傷、疾病、失蹤', ref: '4.3' },
+    { kind: 'type', code: 'E', name: '環境', name_en: 'Environmental', criteria: '油污、垃圾、有害物質洩漏', ref: '4.3' },
+    { kind: 'type', code: 'S', name: '保安', name_en: 'Security', criteria: '海盜、偷渡、走私', ref: '4.3' },
+    { kind: 'type', code: 'F', name: '火災', name_en: 'Fire', criteria: '火災、爆炸、危險品事故', ref: '4.3' },
+    { kind: 'type', code: 'T', name: '結構', name_en: 'sTructural', criteria: '船體、艙蓋、管系破損', ref: '4.3' },
+    { kind: 'type', code: 'O', name: '其他', name_en: 'Others', criteria: '無法歸類之事故；PSC 檢查一律用 O', ref: '4.3' },
+    { kind: 'param', code: 'ontime_target', name: '通報時限準時率目標（%）', value: '95', ref: '委外管理評比表、6.5.5' },
+    { kind: 'param', code: 'progress_major_d', name: '4.1 重大事件進度更新最長間隔（日）', value: '7', ref: '6.4.2.3' },
+    { kind: 'param', code: 'retention_years', name: '紀錄保存年限（年）', value: '5', ref: '6.7' },
+    { kind: 'param', code: 'close_docs', name: '非 PSC 事故結案前須歸檔的文件（任一）', value: 'RCA,CLOSE', ref: '6.6.4.4' }
+  ].map(function (r) {
+    var o = { rule_set: RULESET_DEFAULT, valid_from: '2000-01-01', active: 'Y', note: '' };
+    ['kind', 'code', 'name', 'name_en', 'flash_h', 'initial_h', 'progress_d', 'rca_d', 'loss_usd_min', 'deaths_min', 'delay_h_min', 'injury_min', 'ert_chair', 'min_tier', 'value', 'criteria', 'ref'].forEach(function (c) { o[c] = r[c] === undefined ? '' : r[c]; });
+    return o;
+  });
+  function ruleRows(rows) { return rows && rows.length ? rows : DEFAULT_RULES; }
+  /** 某日期有效的規範：每個 kind+code 取 valid_from ≤ 日期 中最新的一列 */
+  function rulesAt(rows, date) {
+    var d = isoDate(date) || '9999-12-31', pick = {};
+    ruleRows(rows).forEach(function (r) {
+      if (up(r.active) === 'N') return;
+      var vf = isoDate(r.valid_from) || '2000-01-01';
+      if (vf > d) return;
+      var k = s(r.kind) + '|' + up(r.code);
+      if (!pick[k] || vf >= (isoDate(pick[k].valid_from) || '2000-01-01')) pick[k] = r;
+    });
+    var out = { set: '', tiers: {}, major: {}, types: {}, params: {} };
+    Object.keys(pick).forEach(function (k) {
+      var r = pick[k], code = up(r.code);
+      if (r.kind === 'tier') out.tiers[code] = r; else if (r.kind === 'major') out.major[code] = r;
+      else if (r.kind === 'type') out.types[code] = r; else if (r.kind === 'param') out.params[s(r.code)] = s(r.value);
+      if (!out.set || (isoDate(r.valid_from) || '') > (out.setFrom || '')) { out.set = s(r.rule_set); out.setFrom = isoDate(r.valid_from) || ''; }
+    });
+    if (!Object.keys(out.tiers).length) DEFAULT_RULES.filter(function (r) { return r.kind === 'tier'; }).forEach(function (r) { out.tiers[r.code] = r; });
+    if (!Object.keys(out.types).length) DEFAULT_RULES.filter(function (r) { return r.kind === 'type'; }).forEach(function (r) { out.types[r.code] = r; });
+    return out;
+  }
+  function numOr(v, d) { var n = parseFloat(s(v)); return isNaN(n) ? d : n; }
+  /** 依規範計算各階段期限（日期；時數換算為事故日起算的日曆日，2 / 12 小時 = 當日） */
+  function ruleDeadlines(date, tier, R) {
+    var t = (R && R.tiers[s(tier)]) || (R && R.tiers['3']) || null;
+    if (!t || !isoDate(date)) return deadlines(date, tier);
+    return { flash_due: addDays(date, Math.floor(numOr(t.flash_h, 2) / 24)), initial_due: addDays(date, Math.floor(numOr(t.initial_h, 24) / 24)), rca_due: addDays(date, numOr(t.rca_d, 14)) };
+  }
+  /** 依 4.1 數值條件建議重大事件等級（劫持、污染等文字條件須人工判斷）；數字包含本數（7.2） */
+  function suggestMajor(inc, R) {
+    var loss = numOr(inc.loss_usd, 0), deaths = numOr(inc.deaths, 0), inj = numOr(inc.injuries, 0), delay = numOr(inc.delay_h, 0);
+    var lv = ['1', '2', '3'];
+    for (var i = 0; i < lv.length; i++) {
+      var m = R.major[lv[i]]; if (!m) continue;
+      var why = [];
+      if (s(m.loss_usd_min) && loss >= numOr(m.loss_usd_min, Infinity)) why.push('海損 USD ' + loss + ' ≥ ' + m.loss_usd_min);
+      if (s(m.deaths_min) && deaths >= numOr(m.deaths_min, Infinity)) why.push('死亡 ' + deaths + ' 人 ≥ ' + m.deaths_min);
+      if (s(m.delay_h_min) && delay >= numOr(m.delay_h_min, Infinity)) why.push('延誤 ' + delay + ' 小時 ≥ ' + m.delay_h_min);
+      if (s(m.injury_min) && inj >= numOr(m.injury_min, Infinity)) why.push('受傷 ' + inj + ' 人');
+      if (why.length) return { level: lv[i], reasons: why, chair: s(m.ert_chair), min_tier: s(m.min_tier) };
+    }
+    return { level: '', reasons: [], chair: '', min_tier: '' };
+  }
+  /** 各階段報告：期限、實際提交日（欄位優先，其次為最早歸檔文件的上傳日）、狀態 */
+  var STAGES = [{ k: 'flash', doc: 'FLASH', label: '立即通報' }, { k: 'initial', doc: 'INIT', label: '初步報告' }, { k: 'rca', doc: 'RCA', label: '最終調查報告 RCA' }];
+  function reportTimeliness(inc, docs, today) {
+    var t = isoDate(today), fm = yes(inc.force_majeure);
+    // 從事故登錄器匯入、完全沒有填報日期也沒有文件的舊事故：標為「未填報」，不算逾期，也不計入準時率
+    var untracked = (s(inc.source) === 'REGISTER' || s(inc.created_by) === 'import') && !STAGES.some(function (st) { return isoDate(inc[st.k + '_at']); }) && !(docs || []).some(function (d) { return STAGES.some(function (st) { return d.doc_type === st.doc; }); });
+    return STAGES.map(function (st) {
+      var due = s(inc[st.k + '_due']), at = isoDate(inc[st.k + '_at']), src = at ? '填報' : '';
+      if (!at) { var ds = (docs || []).filter(function (d) { return d.doc_type === st.doc; }).map(function (d) { return isoDate(d.uploaded_at); }).filter(Boolean).sort(); if (ds.length) { at = ds[0]; src = '文件'; } }
+      var state = at ? (due && at > due ? 'late' : 'ontime') : (due && t > due ? 'overdue' : 'pending');
+      if (fm && state !== 'ontime') state = 'exempt';
+      if (untracked && state !== 'ontime') state = 'untracked';
+      return { stage: st.k, label: st.label, due: due, at: at, src: src, state: state };
+    });
+  }
+  /** 事故的規範檢核（顯示在事故頁與資料檢核） */
+  function incidentChecks(inc, docs, rulesRows, today) {
+    var R = rulesAt(rulesRows, inc.date), out = [], t = isoDate(today);
+    if (s(inc.status) === STATUS.VOID) return out;
+    var m = R.major[s(inc.major_level)];
+    if (m && s(m.min_tier) && TIERS[s(inc.tier)] && Number(inc.tier) > Number(m.min_tier)) out.push('4.2.4.2：屬 4.1 ' + m.name + '，通報分級不得低於第' + m.min_tier + '級（目前 Tier ' + inc.tier + '）');
+    if (m && !yes(inc.ert)) out.push('4.2.4.1：屬 4.1 ' + m.name + '，應成立緊急應變小組（由' + m.ert_chair + '主持）');
+    var sug = suggestMajor(inc, R);
+    if (sug.level && (!s(inc.major_level) || Number(sug.level) < Number(inc.major_level))) out.push('4.1：數值符合' + (R.major[sug.level] || {}).name + '（' + sug.reasons.join('、') + '），請確認是否為重大事件');
+    if (s(inc.status) === STATUS.OPEN) {
+      reportTimeliness(inc, docs, t).forEach(function (x) { if (x.state === 'overdue') out.push(x.label + '已逾期（期限 ' + x.due + '）'); });
+      var pd = m ? numOr(R.params.progress_major_d, 7) : numOr((R.tiers[s(inc.tier)] || {}).progress_d, 0);
+      if (pd && isoDate(inc.date)) {
+        var lastUpd = [isoDate(inc.progress_at)].concat((docs || []).filter(function (d) { return d.doc_type === 'UPD'; }).map(function (d) { return isoDate(d.uploaded_at); })).filter(Boolean).sort().pop() || isoDate(inc.date);
+        if (daysBetween(lastUpd, t) > pd) out.push('6.4.2.3：進度更新超過 ' + pd + ' 天（最近 ' + lastUpd + '）');
+      }
+    }
+    if (s(inc.status) === STATUS.CLOSED && s(inc.close_checks).replace(/[^Y]/g, '').length < 4) out.push('6.6.4：結案確認四項未全部勾選');
+    return out;
+  }
+  /** 通報時限達成率（6.5.5、評比表 ≥95%）；不可抗力不計入 */
+  function ontimeStats(incidents, docsByNo, keyf) {
+    var g = {};
+    (incidents || []).forEach(function (inc) {
+      if (s(inc.status) === STATUS.VOID) return;
+      var k = keyf ? keyf(inc) : 'all', o = g[k] || (g[k] = { due: 0, ontime: 0, late: 0, overdue: 0, exempt: 0, untracked: 0 });
+      reportTimeliness(inc, (docsByNo || {})[inc.tracking_no] || [], inc._today).forEach(function (x) {
+        if (x.state === 'exempt' || x.state === 'untracked') { o[x.state]++; return; }
+        if (x.state === 'pending') return;
+        o.due++; o[x.state]++;
+      });
+    });
+    Object.keys(g).forEach(function (k) { var o = g[k]; o.rate = o.due ? o.ontime / o.due : null; });
+    return g;
+  }
+
+  /* ---------------- port coordinates (map) — editable in the Ports sheet ---------------- */
+  var DEFAULT_PORTS = [
+    ['ABIDJAN', "COTE D'IVOIRE", 5.29, -4.01], ['BALBOA', 'PANAMA', 8.95, -79.57], ['BANGKOK', 'THAILAND', 13.70, 100.57], ['BRISBANE', 'AUSTRALIA', -27.38, 153.17],
+    ['BUSAN', 'SOUTH KOREA', 35.10, 129.04], ['CHENNAI', 'INDIA', 13.10, 80.30], ['DAMMAN', 'SAUDI ARABIA', 26.50, 50.20], ['DAR ES SALAAM', 'TANZANIA', -6.83, 39.29],
+    ['GUANGZHOU', 'CHINA', 22.76, 113.62], ['HAI PHONG', 'VIETNAM', 20.86, 106.75], ['HO CHI MINH', 'VIETNAM', 10.77, 106.75], ['HONG KONG', 'CHINA', 22.34, 114.12],
+    ['HOUSTON', 'USA', 29.61, -95.01], ['INCHEON', 'SOUTH KOREA', 37.46, 126.62], ['JEBEL ALI', 'UAE', 25.01, 55.06], ['KEELUNG', 'TAIWAN', 25.15, 121.74],
+    ['KHORFAKKAN', 'UAE', 25.35, 56.36], ['KOBE', 'JAPAN', 34.67, 135.20], ['LAEM CHABANG', 'THAILAND', 13.08, 100.89], ['LOME', 'TOGO', 6.13, 1.28],
+    ['LONG BEACH', 'USA', 33.76, -118.21], ['LOS ANGELES', 'USA', 33.74, -118.26], ['MANILA', 'PHILIPPINES', 14.60, 120.95], ['MANZANILLO', 'MEXICO', 19.06, -104.30],
+    ['MELBOURNE', 'AUSTRALIA', -37.82, 144.92], ['MUNDRA', 'INDIA', 22.75, 69.70], ['NAGOYA', 'JAPAN', 35.05, 136.85], ['NINGBO', 'CHINA', 29.93, 121.85],
+    ['ONNE', 'NIGERIA', 4.70, 7.15], ['OSAKA', 'JAPAN', 34.63, 135.43], ['PENANG', 'MALAYSIA', 5.41, 100.35], ['PORT KLANG', 'MALAYSIA', 3.00, 101.37],
+    ['PRINCE RUPERT', 'CANADA', 54.30, -130.34], ['QINGDAO', 'CHINA', 36.02, 120.21], ['SHANGHAI', 'CHINA', 30.63, 122.07], ['SHEKOU', 'CHINA', 22.48, 113.91],
+    ['SHENZHEN', 'CHINA', 22.57, 114.27], ['SI RACHA', 'THAILAND', 13.17, 100.92], ['SUBIC', 'PHILIPPINES', 14.81, 120.28], ['SURABAYA', 'INDONESIA', -7.20, 112.73],
+    ['SYDNEY', 'AUSTRALIA', -33.97, 151.22], ['TIANJIN', 'CHINA', 38.97, 117.79], ['TOKYO', 'JAPAN', 35.62, 139.79], ['XIAMEN', 'CHINA', 24.48, 118.07],
+    ['YOKOHAMA', 'JAPAN', 35.45, 139.66], ['SINGAPORE', 'SINGAPORE', 1.26, 103.84], ['KAOHSIUNG', 'TAIWAN', 22.61, 120.28], ['TAICHUNG', 'TAIWAN', 24.29, 120.51],
+    ['COLOMBO', 'SRI LANKA', 6.95, 79.84], ['NHAVA SHEVA', 'INDIA', 18.95, 72.95], ['KARACHI', 'PAKISTAN', 24.84, 66.98], ['CHITTAGONG', 'BANGLADESH', 22.31, 91.80]
+  ].map(function (r) { return { port: r[0], country: r[1], lat: String(r[2]), lng: String(r[3]), note: '' }; });
+  /** 港口座標：Ports 分頁優先，沒有的用預設值 */
+  function portTable(rows) {
+    var m = {};
+    DEFAULT_PORTS.forEach(function (r) { m[up(r.port)] = r; });
+    (rows || []).forEach(function (r) { if (s(r.port) && !isNaN(parseFloat(r.lat)) && !isNaN(parseFloat(r.lng))) m[up(r.port)] = { port: up(r.port), country: normCountry(r.country), lat: s(r.lat), lng: s(r.lng), note: s(r.note) }; });
+    return m;
+  }
+
 
   var SCHEMA = {
     Inspections: ['insp_id', 'tracking_no', 'date', 'port', 'country', 'mou', 'vessel', 'imo', 'company', 'management',
@@ -122,13 +270,18 @@ var PSC = (function () {
       'file_id', 'url', 'note', 'uploaded_by', 'uploaded_at'],
     Incidents: ['tracking_no', 'tracking_no_std', 'date', 'company', 'vessel', 'imo', 'tier', 'type', 'priority', 'unit',
       'status', 'pic', 'summary', 'closed_date', 'source', 'insp_id', 'check_notes', 'flash_due', 'initial_due', 'rca_due',
-      'corrective_action', 'created_by', 'created_at', 'updated_by', 'updated_at'],
+      'corrective_action', 'created_by', 'created_at', 'updated_by', 'updated_at',
+      'location', 'major_level', 'loss_usd', 'deaths', 'injuries', 'delay_h', 'ert', 'ert_chair', 'force_majeure', 'fm_note',
+      'flash_at', 'initial_at', 'progress_at', 'rca_at', 'due_note', 'close_checks', 'former_no', 'rule_set'],
     Vessels: ['vessel', 'imo', 'chinese', 'company', 'management', 'manager', 'pic', 'pic_email', 'valid_from', 'valid_to',
       'series', 'flag', 'note', 'doc_company_imo', 'class_society', 'class_number', 'flag_code', 'port_of_registry', 'ship_type',
       'ism_company', 'registered_owner', 'date_of_build', 'gross_tonnage', 'deadweight', 'teu', 'builder', 'nk_data_date'],
     Companies: ['code', 'name', 'doc_imo', 'tmou_performance', 'perf_as_of', 'note'],
     RiskProfiles: ['imo', 'vessel', 'srp', 'company_performance', 'as_of', 'source', 'note'],
     MOUMap: ['country', 'port', 'mou', 'also', 'note'],
+    Rules: ['rule_set', 'valid_from', 'kind', 'code', 'name', 'name_en', 'flash_h', 'initial_h', 'progress_d', 'rca_d',
+      'loss_usd_min', 'deaths_min', 'delay_h_min', 'injury_min', 'ert_chair', 'min_tier', 'value', 'criteria', 'ref', 'active', 'note'],
+    Ports: ['port', 'country', 'lat', 'lng', 'note'],
     NKStatus: ['imo', 'kind', 'code', 'label', 'next', 'due', 'from', 'to', 'alt_from', 'alt_to', 'expiry', 'last', 'source_date'],
     Users: ['email', 'name', 'role', 'active'],
     Settings: ['key', 'value', 'note'],
@@ -318,14 +471,15 @@ var PSC = (function () {
           summary: pscSummary(defsIn.length, rec.port, rec.country, rec.detention === 'Y'), closed_date: '', source: 'PSC',
           insp_id: rec.insp_id, check_notes: '', created_by: user.email, created_at: now
         });
-        store.update('Incidents', 'tracking_no', rec.tracking_no, deadlines(date, tierInfo.tier));
+        var Rp = rulesAt(store.all('Rules'), date);
+        store.update('Incidents', 'tracking_no', rec.tracking_no, Object.assign(ruleDeadlines(date, tierInfo.tier, Rp), { rule_set: Rp.set }));
       } else {
         var cur = parseTrackingNo(rec.tracking_no);
         if (cur && cur.tier !== tierInfo.tier) warnings.push('依目前缺失計算為 Tier ' + tierInfo.tier + '，但編號已發出為 Tier ' + cur.tier + '；編號不變更，請在事故登錄器註記');
         store.update('Incidents', 'tracking_no', rec.tracking_no, { tier: tierInfo.tier, priority: TIERS[tierInfo.tier].en, summary: pscSummary(defsIn.length, rec.port, rec.country, rec.detention === 'Y') });
       }
       rec.tier = tierInfo.tier; rec.type = PSC_TYPE;
-      var dl = deadlines(date, tierInfo.tier);
+      var dl = ruleDeadlines(date, tierInfo.tier, rulesAt(store.all('Rules'), date));
       rec.flash_due = dl.flash_due; rec.initial_due = dl.initial_due; rec.rca_due = dl.rca_due;
       if (!rec.status || rec.status === STATUS.NIL || rec.status === STATUS.MISSING) rec.status = STATUS.OPEN;
     } else {
@@ -415,8 +569,9 @@ var PSC = (function () {
       if (inc.insp_id) return setCaseStatus(store, user, { insp_id: inc.insp_id, status: p.status, closed_date: p.closed_date, force: p.force });
       var closingI = p.status === STATUS.CLOSED;
       var cdI = closingI ? (isoDate(p.closed_date) || store.now().slice(0, 10)) : '';
-      if (closingI && !p.force && !store.all('Documents').some(function (d) { return d.tracking_no === inc.tracking_no && (d.doc_type === 'RCA' || d.doc_type === 'CLOSE'); }))
-        throw new Error('尚未歸檔 RCA 或結案確認文件');
+      var need_ = listOf(rulesAt(store.all('Rules'), inc.date).params.close_docs || 'RCA,CLOSE');
+      if (closingI && !p.force && need_.length && !store.all('Documents').some(function (d) { return d.tracking_no === inc.tracking_no && need_.indexOf(up(d.doc_type)) >= 0; }))
+        throw new Error('尚未歸檔 ' + need_.join(' 或 ') + ' 文件（6.6.4.4）');
       var pI = { status: closingI ? STATUS.CLOSED : STATUS.OPEN, closed_date: cdI, updated_by: user.email, updated_at: store.now() };
       store.update('Incidents', 'tracking_no', inc.tracking_no, pI);
       audit(store, user, closingI ? 'close_incident' : 'reopen_incident', inc.tracking_no, cdI);
@@ -438,11 +593,24 @@ var PSC = (function () {
     return Object.assign({}, insp, patch);
   }
 
+  var INC_TEXT = ['summary', 'pic', 'unit', 'corrective_action', 'check_notes', 'location', 'ert_chair', 'fm_note', 'due_note', 'close_checks'];
+  var INC_NUM = ['loss_usd', 'deaths', 'injuries', 'delay_h'];
+  var INC_DATE = ['flash_due', 'initial_due', 'rca_due', 'flash_at', 'initial_at', 'progress_at', 'rca_at'];
+  var INC_FLAG = ['ert', 'force_majeure'];
+  function incidentExtras(f, patch) {
+    INC_TEXT.forEach(function (k) { if (k in f) patch[k] = s(f[k]); });
+    INC_NUM.forEach(function (k) { if (k in f) { var t = s(f[k]); if (t && num(t) === '') throw new Error(k + ' 需為數字：' + t); patch[k] = num(t); } });
+    INC_DATE.forEach(function (k) { if (k in f) patch[k] = isoDate(f[k]); });
+    INC_FLAG.forEach(function (k) { if (k in f) patch[k] = yes(f[k]) ? 'Y' : 'N'; });
+    if ('major_level' in f) { var m = s(f.major_level); if (m && !TIERS[m]) throw new Error('4.1 重大事件等級需為 1、2、3 或空白'); patch.major_level = m; }
+    return patch;
+  }
   function saveIncident(store, user, p) {
     need(user, 'editor');
     var date = isoDate(p.date); if (!date) throw new Error('請填寫事故日期');
-    var tier = s(p.tier); if (!TIERS[tier]) throw new Error('嚴重程度需為 1、2 或 3');
-    var type = up(p.type); if (!TYPES[type]) throw new Error('事故性質代碼不在規則內：' + type);
+    var R = rulesAt(store.all('Rules'), date);
+    var tier = s(p.tier); if (!TIERS[tier]) throw new Error('通報分級需為 1、2 或 3');
+    var type = up(p.type); if (!R.types[type]) throw new Error('事故性質代碼不在規範內：' + type);
     var v = vesselAt(store.all('Vessels'), p.imo || p.vessel, date);
     if (!v) throw new Error('船隊資料找不到這艘船：' + (p.vessel || p.imo));
     var incidents = store.all('Incidents');
@@ -450,31 +618,117 @@ var PSC = (function () {
     var row = {
       tracking_no: no, tracking_no_std: no, date: date, company: up(v.company), vessel: up(v.vessel), imo: s(v.imo), tier: tier, type: type,
       priority: TIERS[tier].en, unit: s(p.unit) || '海技', status: STATUS.OPEN, pic: s(p.pic) || s(v.pic), summary: s(p.summary),
-      closed_date: '', source: 'MANUAL', insp_id: '', check_notes: '', created_by: user.email, created_at: store.now()
+      closed_date: '', source: 'MANUAL', insp_id: '', check_notes: '', created_by: user.email, created_at: store.now(), rule_set: R.set
     };
-    Object.assign(row, deadlines(date, tier));
+    Object.assign(row, ruleDeadlines(date, tier, R));
+    incidentExtras(p, row);
+    if (s(p.major_level) && !s(row.ert_chair) && R.major[s(p.major_level)]) row.ert_chair = s(R.major[s(p.major_level)].ert_chair);
     store.insert('Incidents', row);
     audit(store, user, 'create_incident', no, p.summary);
     return row;
   }
 
-  /** 修改事故內容（編號、日期、船名不變；等級改變只提醒，不改號） */
+  /**
+   * 修改事故的任何欄位（給舊帳修正用）。
+   * - 事故編號預設不變；管理員勾選 renumber 才依新內容重新編號，舊號留在 former_no，並同步更新檢查、缺失、文件的 tracking_no。
+   * - PSC 事故的日期、船名、簡述由對應的 PSC 檢查決定，這裡不改。
+   * - 期限欄可以直接改（例如合約期限較短），原因寫在 due_note；清空期限 + recalc 會依規範重算。
+   */
   function updateIncident(store, user, p) {
     need(user, 'editor');
     var inc = store.all('Incidents').filter(function (r) { return r.tracking_no === s(p.tracking_no); })[0];
     if (!inc) throw new Error('找不到事故 ' + p.tracking_no);
-    var f = p.fields || {}, patch = { updated_by: user.email, updated_at: store.now() };
-    ['summary', 'pic', 'unit', 'corrective_action', 'check_notes'].forEach(function (k) { if (k in f) patch[k] = s(f[k]); });
-    if (inc.source === 'PSC' && 'summary' in f) delete patch.summary;
+    var f = p.fields || {}, patch = { updated_by: user.email, updated_at: store.now() }, warnings = [];
+    var psc = inc.source === 'PSC' || !!s(inc.insp_id);
+    incidentExtras(f, patch);
+    if (psc) delete patch.summary;
+    if ('date' in f && isoDate(f.date) !== inc.date) { if (psc) throw new Error('PSC 事故的日期請在 PSC 檢查修改'); patch.date = isoDate(f.date); if (!patch.date) throw new Error('日期格式不正確'); }
+    if (('imo' in f || 'vessel' in f) && !psc) {
+      var d0 = patch.date || inc.date, v = vesselAt(store.all('Vessels'), f.imo || f.vessel, d0);
+      if (!v) throw new Error('船隊資料找不到這艘船：' + (f.vessel || f.imo));
+      if (s(v.imo) !== s(inc.imo) || up(v.vessel) !== up(inc.vessel)) { patch.imo = s(v.imo); patch.vessel = up(v.vessel); }
+    }
+    if ('company' in f && up(f.company) && up(f.company) !== up(inc.company)) { if (!COMPANY_TO_MGMT[up(f.company)]) throw new Error('公司碼不在清單：' + f.company); patch.company = up(f.company); }
+    if ('tier' in f && s(f.tier) !== s(inc.tier)) { if (!TIERS[s(f.tier)]) throw new Error('通報分級需為 1、2 或 3'); patch.tier = s(f.tier); patch.priority = TIERS[patch.tier].en; }
+    var R = rulesAt(store.all('Rules'), patch.date || inc.date);
+    if ('type' in f && up(f.type) !== up(inc.type)) { if (!R.types[up(f.type)]) throw new Error('事故性質代碼不在規範內：' + f.type); patch.type = up(f.type); }
+    if ('status' in f && s(f.status) !== s(inc.status)) {
+      var st = s(f.status);
+      if ([STATUS.OPEN, STATUS.CLOSED, STATUS.VOID].indexOf(st) < 0) throw new Error('狀態只能是 進行中 / 已完成 / 作廢');
+      if (st === STATUS.VOID) { need(user, 'admin'); if (psc) throw new Error('PSC 事故不能作廢；請修改對應的 PSC 檢查'); }
+      patch.status = st;
+      patch.closed_date = st === STATUS.CLOSED ? (isoDate(f.closed_date) || isoDate(inc.closed_date) || store.now().slice(0, 10)) : '';
+    } else if ('closed_date' in f && s(inc.status) === STATUS.CLOSED) patch.closed_date = isoDate(f.closed_date);
+    if (p.recalc) { var dl = ruleDeadlines(patch.date || inc.date, patch.tier || inc.tier, R); INC_DATE.slice(0, 3).forEach(function (k) { patch[k] = dl[k]; }); patch.rule_set = R.set; }
+    var keyChanged = ['date', 'vessel', 'tier', 'type', 'company'].some(function (k) { return k in patch; });
+    var newNo = inc.tracking_no;
+    if (p.renumber) {
+      need(user, 'admin');
+      var others = store.all('Incidents').filter(function (r) { return r.tracking_no !== inc.tracking_no; });
+      var vv = patch.vessel || inc.vessel, dd = patch.date || inc.date;
+      newNo = buildTrackingNo(patch.company || inc.company, vv, dd, patch.tier || inc.tier, patch.type || inc.type, nextSeq(others, vv, dd));
+      if (newNo !== inc.tracking_no) { patch.former_no = [s(inc.former_no), inc.tracking_no].filter(Boolean).join('；'); patch.tracking_no = newNo; patch.tracking_no_std = newNo; }
+    } else if (keyChanged) warnings.push('編號沒有跟著變更（仍為 ' + inc.tracking_no + '）；需要時請由管理員勾選「重新編號」');
     store.update('Incidents', 'tracking_no', inc.tracking_no, patch);
-    audit(store, user, 'update_incident', inc.tracking_no, patch);
-    return Object.assign({}, inc, patch);
+    if (newNo !== inc.tracking_no) {
+      ['Inspections', 'Deficiencies', 'Documents'].forEach(function (t) { store.updateWhere(t, function (r) { return r.tracking_no === inc.tracking_no; }, { tracking_no: newNo }); });
+    }
+    if (psc && 'status' in patch && patch.status !== STATUS.VOID) store.update('Inspections', 'insp_id', inc.insp_id, { status: patch.status, closed_date: patch.closed_date });
+    if (psc && patch.tier) store.update('Inspections', 'insp_id', inc.insp_id, { tier: patch.tier, tier_reason: '人工調整：' + (s(f.tier_reason) || '於事故頁修改') });
+    audit(store, user, p.renumber ? 'renumber_incident' : 'update_incident', inc.tracking_no, patch);
+    var out = Object.assign({}, inc, patch);
+    return { incident: out, warnings: warnings.concat(incidentChecks(out, [], store.all('Rules'), store.now().slice(0, 10)).filter(function (w) { return /4\.2\.4/.test(w); })) };
   }
-  /** 事故期限：已存的優先，否則依日期與等級推算（歷史匯入資料） */
-  function incidentDeadlines(inc) {
-    if (s(inc.rca_due)) return { flash_due: s(inc.flash_due), initial_due: s(inc.initial_due), rca_due: s(inc.rca_due) };
-    var t = TIERS[s(inc.tier)] ? s(inc.tier) : '3';
-    return isoDate(inc.date) ? deadlines(inc.date, t) : { flash_due: '', initial_due: '', rca_due: '' };
+  /** 事故期限：已存（或人工調整）的優先，否則依事故日期當時有效的規範推算（匯入的舊資料） */
+  function incidentDeadlines(inc, rulesRows) {
+    var d = isoDate(inc.date), t = TIERS[s(inc.tier)] ? s(inc.tier) : '3';
+    var calc = d ? ruleDeadlines(d, t, rulesAt(rulesRows, d)) : { flash_due: '', initial_due: '', rca_due: '' };
+    return { flash_due: s(inc.flash_due) || calc.flash_due, initial_due: s(inc.initial_due) || calc.initial_due, rca_due: s(inc.rca_due) || calc.rca_due };
+  }
+
+  /* ---------------- rules & ports maintenance (admin) ---------------- */
+  function ruleKey(r) { return s(r.rule_set) + '|' + (isoDate(r.valid_from) || '') + '|' + s(r.kind) + '|' + up(r.code); }
+  function saveRule(store, user, p) {
+    need(user, 'admin');
+    var row = {}; SCHEMA.Rules.forEach(function (c) { row[c] = s(p[c]); });
+    row.valid_from = isoDate(row.valid_from); row.code = s(row.kind) === 'param' ? s(row.code) : up(row.code);
+    if (!row.rule_set || !row.valid_from || !row.kind || !row.code) throw new Error('版本名稱、生效日、類別、代碼都要填');
+    if (['tier', 'major', 'type', 'param'].indexOf(row.kind) < 0) throw new Error('類別只能是 tier / major / type / param');
+    ['flash_h', 'initial_h', 'progress_d', 'rca_d', 'loss_usd_min', 'deaths_min', 'delay_h_min', 'injury_min'].forEach(function (k) { if (row[k] && num(row[k]) === '') throw new Error(k + ' 需為數字'); });
+    if (!row.active) row.active = 'Y';
+    var all = store.all('Rules');
+    if (!all.length) all = DEFAULT_RULES.map(function (r) { return Object.assign({}, r); });
+    var k = ruleKey(row), oldK = s(p.old_key) || k;
+    var keep = all.filter(function (r) { return ruleKey(r) !== oldK && ruleKey(r) !== k; });
+    if (!p.remove) keep.push(row);
+    ['tier', 'major', 'type', 'param'].forEach(function (kd) { store.replaceWhere('Rules', 'kind', kd, keep.filter(function (r) { return r.kind === kd; })); });
+    audit(store, user, p.remove ? 'delete_rule' : 'save_rule', k, row);
+    return row;
+  }
+  /** 以某天有效的規範為底，複製成新版本（例如第 2 版正式發行、或第 3 版） */
+  function newRuleSet(store, user, p) {
+    need(user, 'admin');
+    var vf = isoDate(p.valid_from), name = s(p.rule_set);
+    if (!vf || !name) throw new Error('請填新版本名稱與生效日');
+    var all = store.all('Rules'); if (!all.length) all = DEFAULT_RULES.map(function (r) { return Object.assign({}, r); });
+    if (all.some(function (r) { return s(r.rule_set) === name; })) throw new Error('已經有同名的版本：' + name);
+    var base = rulesAt(all, isoDate(p.base_date) || vf), rows = [];
+    ['tiers', 'major', 'types'].forEach(function (g) { Object.keys(base[g]).forEach(function (c) { rows.push(Object.assign({}, base[g][c], { rule_set: name, valid_from: vf, note: '由「' + base.set + '」複製' })); }); });
+    ruleRows(all).filter(function (r) { return r.kind === 'param'; }).forEach(function (r) { if (base.params[s(r.code)] === s(r.value) && !rows.some(function (x) { return x.kind === 'param' && x.code === r.code; })) rows.push(Object.assign({}, r, { rule_set: name, valid_from: vf, note: '由「' + base.set + '」複製' })); });
+    var keep = all.concat(rows);
+    ['tier', 'major', 'type', 'param'].forEach(function (kd) { store.replaceWhere('Rules', 'kind', kd, keep.filter(function (r) { return r.kind === kd; })); });
+    audit(store, user, 'new_rule_set', name, { valid_from: vf, rows: rows.length });
+    return { rule_set: name, rows: rows.length };
+  }
+  function savePort(store, user, p) {
+    need(user, 'editor');
+    var row = { port: up(p.port), country: normCountry(p.country), lat: s(p.lat), lng: s(p.lng), note: s(p.note) };
+    if (!row.port) throw new Error('請填港口');
+    var la = parseFloat(row.lat), lo = parseFloat(row.lng);
+    if (isNaN(la) || isNaN(lo) || la < -90 || la > 90 || lo < -180 || lo > 180) throw new Error('緯度需在 -90～90、經度需在 -180～180');
+    if (store.all('Ports').some(function (r) { return up(r.port) === row.port; })) store.update('Ports', 'port', row.port, row); else store.insert('Ports', row);
+    audit(store, user, 'save_port', row.port, row);
+    return row;
   }
 
   /* ---------------- MOU map maintenance ---------------- */
@@ -653,7 +907,8 @@ var PSC = (function () {
 
   /* ---------------- data check (for co-edited Google Sheet) ---------------- */
   var DATE_FIELDS = { date: 1, deadline: 1, rectified_date: 1, closed_date: 1, valid_from: 1, valid_to: 1, flash_due: 1, initial_due: 1, rca_due: 1,
-    date_of_build: 1, nk_data_date: 1, as_of: 1, perf_as_of: 1, due: 1, from: 1, to: 1, alt_from: 1, alt_to: 1, expiry: 1, last: 1, source_date: 1 };
+    date_of_build: 1, nk_data_date: 1, as_of: 1, perf_as_of: 1, due: 1, from: 1, to: 1, alt_from: 1, alt_to: 1, expiry: 1, last: 1, source_date: 1,
+    flash_at: 1, initial_at: 1, progress_at: 1, rca_at: 1 };
   /** 手動在試算表輸入時的格式差異（例如 2026/10/2、7109）在讀取時統一 */
   function normalizeRow(table, row) {
     var o = {};
@@ -717,6 +972,10 @@ var PSC = (function () {
       if (MOU_NAMES.indexOf(s(r.mou)) < 0 && s(r.mou) && s(r.mou) !== 'V') add('提醒', 'Inspections', k, 'MOU 名稱不在標準清單：' + r.mou);
     });
     Object.keys(noMap).forEach(function (c) { add('提醒', 'MOUMap', c, 'MOU 對照表沒有這個港口國（' + noMap[c] + ' 次檢查）'); });
+    var pt = portTable(db.ports), noPort = {};
+    ins.forEach(function (r) { if (s(r.port) && !pt[up(r.port)]) noPort[up(r.port)] = 1; });
+    Object.keys(noPort).forEach(function (pp) { add('提醒', 'Ports', pp, '港口沒有座標，地圖會改用國家中心點'); });
+    (db.rules || []).forEach(function (r) { ['flash_h', 'initial_h', 'progress_d', 'rca_d', 'loss_usd_min', 'deaths_min', 'delay_h_min', 'injury_min'].forEach(function (k) { if (s(r[k]) && num(r[k]) === '') add('錯誤', 'Rules', ruleKey(r), k + ' 不是數字：' + r[k]); }); if (!isoDate(r.valid_from)) add('錯誤', 'Rules', ruleKey(r), 'valid_from 日期格式不正確'); });
     mmap.forEach(function (m) { if (MOU_NAMES.indexOf(s(m.mou)) < 0) add('錯誤', 'MOUMap', m.country + (m.port ? ' / ' + m.port : ''), 'MOU 名稱不在標準清單：' + m.mou); });
     var byImo = {}; ves.forEach(function (v) { (byImo[s(v.imo)] = byImo[s(v.imo)] || []).push(v); });
     Object.keys(byImo).forEach(function (k) {
@@ -728,7 +987,12 @@ var PSC = (function () {
     });
     incs.forEach(function (i) {
       if (!parseTrackingNo(i.tracking_no)) add('提醒', 'Incidents', i.tracking_no, '事故編號格式無法解析');
-      if ([STATUS.OPEN, STATUS.CLOSED].indexOf(s(i.status)) < 0) add('錯誤', 'Incidents', i.tracking_no, '狀態只能是 進行中 / 已完成：' + i.status);
+      if ([STATUS.OPEN, STATUS.CLOSED, STATUS.VOID].indexOf(s(i.status)) < 0) add('錯誤', 'Incidents', i.tracking_no, '狀態只能是 進行中 / 已完成 / 作廢：' + i.status);
+      var R_ = rulesAt(db.rules, i.date), m_ = R_.major[s(i.major_level)];
+      if (s(i.major_level) && !m_) add('錯誤', 'Incidents', i.tracking_no, 'major_level 只能是 1、2、3 或空白');
+      if (m_ && TIERS[s(i.tier)] && Number(i.tier) > Number(m_.min_tier)) add('提醒', 'Incidents', i.tracking_no, '屬 4.1 ' + m_.name + '，通報分級不得低於第' + m_.min_tier + '級（4.2.4.2）');
+      if (s(i.type) && !R_.types[up(i.type)]) add('提醒', 'Incidents', i.tracking_no, '事故性質代碼不在規範內：' + i.type);
+      INC_NUM.forEach(function (k) { if (s(i[k]) && num(i[k]) === '') add('錯誤', 'Incidents', i.tracking_no, k + ' 不是數字：' + i[k]); });
       if (s(i.status) === STATUS.CLOSED && !isoDate(i.closed_date)) add('提醒', 'Incidents', i.tracking_no, '已完成但沒有結案日');
       if (s(i.insp_id) && !byId[i.insp_id]) add('錯誤', 'Incidents', i.tracking_no, 'insp_id 找不到對應檢查 ' + i.insp_id);
     });
@@ -815,8 +1079,10 @@ var PSC = (function () {
       version: VERSION, user: user, settings: settingsMap(store),
       vessels: store.all('Vessels'), inspections: store.all('Inspections'), deficiencies: store.all('Deficiencies'),
       documents: store.all('Documents'), incidents: store.all('Incidents'), companies: store.all('Companies'),
-      riskProfiles: store.all('RiskProfiles'), nkStatus: store.all('NKStatus'), mouMap: store.all('MOUMap')
+      riskProfiles: store.all('RiskProfiles'), nkStatus: store.all('NKStatus'), mouMap: store.all('MOUMap'),
+      rules: store.all('Rules'), ports: store.all('Ports')
     };
+    if (!out.rules.length) out.rules = DEFAULT_RULES.map(function (r) { return Object.assign({}, r); });
     if (!out.mouMap.length) out.mouMap = DEFAULT_MOU.map(function (r) { return Object.assign({}, r); });
     out.canBribe = canBribe(user, out.settings);
     if (!out.canBribe) out.inspections.forEach(function (r) { BRIBE_FIELDS.forEach(function (f) { delete r[f]; }); });
@@ -848,7 +1114,10 @@ var PSC = (function () {
       case 'uploadDocument': return store.lock(function () { return uploadDocument(store, user, payload); });
       case 'setCaseStatus': return setCaseStatus(store, user, payload);
       case 'saveIncident': return store.lock(function () { return saveIncident(store, user, payload); });
-      case 'updateIncident': return updateIncident(store, user, payload);
+      case 'updateIncident': return store.lock(function () { return updateIncident(store, user, payload); });
+      case 'saveRule': return store.lock(function () { return saveRule(store, user, payload); });
+      case 'newRuleSet': return store.lock(function () { return newRuleSet(store, user, payload); });
+      case 'savePort': return savePort(store, user, payload);
       case 'saveMOU': return store.lock(function () { return saveMOU(store, user, payload); });
       case 'applyMOU': return store.lock(function () { return applyMOU(store, user, payload); });
       case 'saveUser': return adminSave(store, user, 'Users', 'email', payload);
@@ -872,7 +1141,9 @@ var PSC = (function () {
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
     currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS,
     TOKYO: TOKYO, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
-    incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV
+    incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
+    DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,
+    STAGES_LIST: STAGES, reportTimeliness: reportTimeliness, incidentChecks: incidentChecks, ontimeStats: ontimeStats, ruleKey: ruleKey, DEFAULT_PORTS: DEFAULT_PORTS, portTable: portTable
   };
 })();
 if (typeof module !== 'undefined') module.exports = PSC;
