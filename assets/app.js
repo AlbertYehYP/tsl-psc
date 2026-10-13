@@ -115,7 +115,8 @@ async function api(action, payload) {
   try { r = await fetch(CFG.apiUrl.trim(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ idToken: Auth.token, action, payload: payload || {} }) }); }
   catch (e) { throw new Error('連不到後端（Apps Script）。請確認：1) config.js 的 apiUrl 是「管理部署作業」裡的 /exec 網址；2) 部署的「具有存取權的使用者」是「所有人」；3) 用無痕視窗直接打開 apiUrl 會看到 {"ok":true…}'); }
   try { j = await r.json(); } catch (e) { throw new Error('後端回傳的不是資料（HTTP ' + r.status + '）。通常是 Apps Script 尚未授權或部署設定錯誤：請在 Apps Script 執行一次 setup，再「管理部署作業 → 編輯 → 新版本 → 部署」'); }
-  if (!j.ok) throw new Error(j.error || '伺服器錯誤');
+  if (!j.ok) throw new Error(/PSC is not defined/.test(j.error || '') ? '後端缺少 core.gs：請在 Apps Script 把「core」檔整份換成 apps-script/core.gs 的內容（開頭是「TSL PSC System — shared core logic」），「Code」檔放 Code.gs，儲存後部署新版本。' : (j.error || '伺服器錯誤'));
+  if (action === 'bootstrap' && j.data && j.data.version && j.data.version !== PSC.VERSION) console.warn('前端 ' + PSC.VERSION + '／後端 ' + j.data.version + ' 版本不同，請部署相同版本');
   return j.data;
 }
 function jwtPayload(t) { try { return JSON.parse(decodeURIComponent(escape(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))))); } catch (e) { return {}; } }
