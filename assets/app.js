@@ -33,6 +33,21 @@ function fxIn(el, stagger) {
   items.forEach((c, i) => { c.style.setProperty('--i', stagger ? i : 0); c.classList.remove('fx-in'); void c.offsetWidth; c.classList.add('fx-in'); c.addEventListener('animationend', () => c.classList.remove('fx-in'), { once: true }); });
 }
 function fxOut(el) { return new Promise(res => { if (!el || REDUCED || !el.children.length) return res(); [...el.children].forEach(c => c.classList.add('fx-out')); setTimeout(res, 190); }); }
+/** 船舶主檔匯入結果：補了哪些欄位、哪些值與主檔不同 */
+const NK_LABEL = { class_society: '船級', class_number: '船級號', flag: '船旗', flag_code: '船旗代碼', port_of_registry: '船籍港', ship_type: '船型', ism_company: 'ISM 公司', registered_owner: '登記船東', date_of_build: '建造日期', gross_tonnage: 'GT', deadweight: 'DWT', teu: 'TEU', builder: '造船廠', nk_data_date: 'NK 資料日期' };
+function nkResult(r) {
+  const all = r.conflicts || [], done = all.filter(c => c.applied), major = all.filter(c => !c.applied && !c.minor), minor = all.filter(c => !c.applied && c.minor);
+  const by = Object.entries(r.filledBy || {}).map(([k, n]) => `${NK_LABEL[k] || k} ${n}`).join('、');
+  const row = c => `<tr><td>${esc(c.vessel)}${c.former ? ' <span class="dim">（舊列）</span>' : ''}</td><td>${esc(NK_LABEL[c.field] || c.field)}</td><td>${esc(c.current)}</td><td>${esc(c.master)}</td></tr>`;
+  const tbl = (list, h) => `<div class="tbl-wrap" style="max-height:${h}px"><table><thead><tr><th>船名</th><th>欄位</th><th>${list === done ? '原本的值' : '系統現值'}</th><th>${list === done ? '改成（主檔）' : '船舶主檔'}</th></tr></thead><tbody>${list.map(row).join('')}</tbody></table></div>`;
+  const modeTxt = { class: '船級欄位以 Class 為準', fill: '只補空白', overwrite: '全部以主檔覆蓋' }[r.mode] || r.mode;
+  openModal({ title: '船舶主檔匯入完成', sub: `${r.imported.length} 艘・${modeTxt}・補上 ${r.filled} 個空白欄位・更新 ${done.length} 個值`,
+    html: `${by ? `<p class="note" style="margin-top:0">補上的欄位：${esc(by)}</p>` : ''}${r.skipped && r.skipped.length ? `<p class="flag">系統船隊資料沒有這些 IMO，已略過：${esc(r.skipped.join('、'))}</p>` : ''}
+    ${done.length ? `<h2 style="margin:12px 0 6px">已改成主檔的值（${done.length}）</h2>${tbl(done, 260)}` : ''}
+    ${major.length ? `<h2 style="margin:14px 0 6px">與主檔不同，未變更（${major.length}）</h2>${tbl(major, 220)}<p class="note">改名 / 換管理前的舊列保留當時的船旗、船東等資料；其他欄位如需改成主檔的值，可在試算表 Vessels 分頁個別修改，或選「全部以主檔覆蓋」再匯入。</p>` : ''}
+    ${!done.length && !major.length ? '<p class="note">沒有與主檔不同的值。</p>' : ''}
+    ${minor.length ? `<details style="margin-top:10px"><summary class="dim">造船廠中文簡稱與主檔英文名稱不同（${minor.length}，保留中文）</summary>${tbl(minor, 220)}</details>` : ''}` });
+}
 /** 彈出視窗：淡入（向上）開啟、淡出（繼續向上）關閉 */
 function openModal(o) {
   const back = document.createElement('div'); back.className = 'modal-back'; back.setAttribute('role', 'dialog'); back.setAttribute('aria-modal', 'true');
@@ -400,7 +415,7 @@ function profileHTML(k, c) {
   const rep = {}; defs.forEach(d => { if (d.code) (rep[d.code] || (rep[d.code] = new Set())).add(d.date); });
   const repl = Object.entries(rep).filter(([, s]) => s.size > 1);
   const facts = [['IMO', V.imo || '—'], ['船型系列', cur.series || '—'], ['船旗', cur.flag || '—'], ['事故編號公司碼', cur.company || '—'], ['管理公司', cur.manager || cur.management || '—'], ['DOC 公司 IMO', cur.doc_company_imo || '—'], ['負責人 PIC', cur.pic || '—'],
-    ['建造日期', cur.date_of_build ? dfmt(cur.date_of_build) : '—'], ['造船廠', cur.builder || '—'], ['船級 / 船級號', [cur.class_society, cur.class_number].filter(Boolean).join(' ') || '—'], ['GT / DWT', [cur.gross_tonnage, cur.deadweight].filter(Boolean).map(fmt).join(' / ') || '—'], ['TEU', cur.teu ? fmt(cur.teu) : '—'], ['登記船東', cur.registered_owner || '—'], ['NK 資料日期', cur.nk_data_date ? dfmt(cur.nk_data_date) : '未匯入']];
+    ['建造日期', cur.date_of_build ? dfmt(cur.date_of_build) : '—'], ['造船廠', cur.builder || '—'], ['船級 / 船級號', [cur.class_society, cur.class_number].filter(Boolean).join(' ') || '—'], ['GT / DWT', [cur.gross_tonnage, cur.deadweight].filter(Boolean).map(fmt).join(' / ') || '—'], ['TEU', cur.teu ? fmt(cur.teu) : '—'], ['登記船東', cur.registered_owner || '—'], ['船籍港', cur.port_of_registry || '—'], ['ISM 公司', cur.ism_company || '—'], ['NK 資料日期', cur.nk_data_date ? dfmt(cur.nk_data_date) : '未匯入']];
   const W = windowRows().find(r => String(r.imo) === String(V.imo));
   return `<div class="card"><div class="vprof-head"><div><div class="eyebrow">船舶檔案</div><h2 style="font-size:20px;margin-top:2px">${esc(V.name)} <span class="dim" style="font-weight:400;font-size:15px">${esc(V.zh)}</span></h2>${V.former.length ? `<div class="note" style="margin-top:2px">曾用名 ${esc(V.former.join('、'))}；紀錄保留檢查當時的船名</div>` : ''}</div><button class="btn" type="button" data-close>關閉</button></div>
   <dl class="facts">${facts.map(([a, x]) => `<div><dt>${a}</dt><dd>${esc(x)}</dd></div>`).join('')}</dl>
@@ -968,7 +983,7 @@ function vAdmin(v) {
   <div class="field"><label for="s-white">Tokyo MOU 白名單船旗（估算 SRP）</label><input class="inp" id="s-white" value="${esc(set.tmou_white_flags || '')}"></div>
   <div class="btnrow"><button class="btn primary" type="button" id="s-save">儲存設定</button></div><p class="note" style="margin:0">變更門檻只影響之後新登錄的案件；已發出的編號不會變更。</p></div></div></div>
   <div class="grid g2" style="margin-bottom:16px"><div class="card"><div class="section-head"><h2>資料檢核</h2><button class="btn" type="button" id="dc-run">執行檢核</button></div><p class="sub">組員直接編輯 Google 試算表後，用這裡檢查編號重複、找不到對應、格式錯誤等問題。試算表選單「TSL PSC → 檢核資料」結果相同。</p><div id="dc-out"></div></div>
-  <div class="card"><h2>匯入 NK 船舶資料</h2><p class="sub">貼上或選擇船舶履歷監控系統的 SHIP JSON（survey-status-schema v2），可一次多艘；會更新船隊資料的 NK 欄位與檢驗 / 證書到期。</p><div class="form"><input class="inp" type="file" id="nk-file" accept=".json,application/json"><textarea class="inp mono" id="nk-text" rows="4" placeholder='{"vessel_master": {"imo_number": "9967512", ...}, "certificates": [...], "surveys": [...]}'></textarea><div class="btnrow"><button class="btn primary" type="button" id="nk-go">匯入</button></div></div>
+  <div class="card"><h2>匯入船舶主檔 / NK 資料</h2><p class="sub">選擇船隊監控系統的 <span class="mono">fleet-data.js</span>（整個船隊一次匯入），或貼上 SHIP JSON。依 IMO 對應，更新船級、GT / DWT、TEU、登記船東等欄位與 NK 檢驗 / 證書到期。</p><div class="form"><input class="inp" type="file" id="nk-file" accept=".js,.json,application/json,text/javascript"><textarea class="inp mono" id="nk-text" rows="3" placeholder='{"vessel_master": {"imo_number": "9967512", ...}, "certificates": [...], "surveys": [...]}'></textarea><div class="field"><label for="nk-mode">寫入方式</label><select id="nk-mode"><option value="class">船級欄位以 Class 資料為準，其餘只補空白（建議）</option><option value="fill">只補空白欄位，不同值列出來確認</option><option value="overwrite">全部以主檔覆蓋</option></select></div><div class="btnrow"><button class="btn primary" type="button" id="nk-go">匯入</button><span class="dim" id="nk-info" style="font-size:12.5px"></span></div></div>
   <h2 style="margin-top:14px">管理公司（Tokyo MOU 績效）</h2><div class="tbl-wrap"><table><thead><tr><th>公司碼</th><th>名稱</th><th>DOC 公司 IMO</th><th>績效</th><th>日期</th><th>備註</th></tr></thead><tbody>${M.companies.map(c => `<tr><td class="mono">${esc(c.code)}</td><td>${esc(c.name)}</td><td class="mono">${esc(c.doc_imo)}</td><td>${esc(c.tmou_performance)}</td><td class="num">${dfmt(c.perf_as_of)}</td><td class="dim" style="font-size:12px">${esc(c.note)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚未匯入</td></tr>'}</tbody></table></div></div></div>
   <div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>MOU 對照表（港口國 → 檢查區域）</h2><p class="sub" style="margin:2px 0 0">新登錄的 PSC 檢查依港口國（與港口）自動帶入 MOU；有填港口的列優先。只有 MOU = Tokyo MOU 的檢查會重算 Tokyo MOU 窗口。Google 試算表的「MOUMap」分頁也可以直接編輯。</p></div><div class="btnrow"><button class="btn" type="button" id="m-new">新增一列</button><button class="btn" type="button" id="m-apply">補標空白的檢查</button><button class="btn" type="button" id="m-apply-all">全部依對照表重新套用</button></div></div>
   ${MM ? `<div class="drop" style="margin-bottom:10px"><div class="frow"><div class="field"><label for="mm-country">港口國</label><input class="inp" id="mm-country" value="${esc(MM.country || '')}" placeholder="UAE"></div><div class="field"><label for="mm-port">港口（選填）</label><input class="inp" id="mm-port" value="${esc(MM.port || '')}" placeholder="空白 = 全國"></div><div class="field"><label for="mm-mou">MOU 區域</label><select id="mm-mou">${PSC.MOU_NAMES.map(m => opt(m, m, MM.mou === m)).join('')}</select></div><div class="field"><label for="mm-also">也是哪些 MOU 成員</label><input class="inp" id="mm-also" value="${esc(MM.also || '')}" placeholder="例如 Indian Ocean MOU"></div></div><div class="field"><label for="mm-note">備註</label><input class="inp" id="mm-note" value="${esc(MM.note || '')}"></div><div class="btnrow"><button class="btn primary" type="button" id="mm-save">儲存</button>${MM._key ? '<button class="btn danger" type="button" id="mm-del">刪除這一列</button>' : ''}<button class="btn ghost" type="button" id="mm-cancel">取消</button></div></div>` : ''}
@@ -983,8 +998,20 @@ function vAdmin(v) {
     const issues = PSC.validateData({ inspections: RAW.inspections, deficiencies: RAW.deficiencies, documents: RAW.documents, incidents: RAW.incidents, vessels: RAW.vessels, mouMap: M.mouMap, rules: M.rules, ports: M.ports });
     $('#dc-out').innerHTML = issues.length ? `<p class="flag">${issues.length} 個問題</p><div class="tbl-wrap"><table><thead><tr><th>等級</th><th>分頁</th><th>鍵值</th><th>問題</th></tr></thead><tbody>${issues.map(i => `<tr><td>${esc(i.level)}</td><td>${esc(i.table)}</td><td class="tn" style="font-size:11.5px;white-space:normal">${esc(i.key)}</td><td>${esc(i.problem)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="note">沒有發現問題</p>';
   });
-  $('#nk-file').addEventListener('change', async e => { const f = e.target.files[0]; if (f) $('#nk-text').value = await f.text(); });
-  $('#nk-go').addEventListener('click', () => { let j; try { j = JSON.parse($('#nk-text').value); } catch (e) { toast('JSON 格式不正確：' + e.message); return; } run(async () => { const r = await api('importNK', { ships: Array.isArray(j) ? j : (j.ships || [j]) }); await reload(); toast('已匯入：' + r.imported.join('、'), 7000); }, $('#nk-go')); });
+  let nkShips = null;
+  const nkParse = text => { const ships = PSC.parseFleetFile(text); if (!ships.length) throw new Error('檔案裡沒有船舶資料'); return ships; };
+  $('#nk-file').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { nkShips = nkParse(await f.text()); $('#nk-text').value = ''; $('#nk-info').textContent = `已讀取 ${f.name}：${nkShips.length} 艘`; }
+    catch (err) { nkShips = null; $('#nk-info').textContent = ''; toast('無法讀取：' + err.message, 7000); }
+  });
+  $('#nk-text').addEventListener('input', () => { nkShips = null; $('#nk-info').textContent = ''; });
+  $('#nk-go').addEventListener('click', () => {
+    let ships = nkShips;
+    if (!ships) { try { ships = nkParse($('#nk-text').value); } catch (e) { toast('格式不正確：' + e.message); return; } }
+    const mode = $('#nk-mode').value;
+    run(async () => { const r = await api('importNK', { ships, mode }); nkShips = null; await reload(); nkResult(r); }, $('#nk-go'));
+  });
   $('#u-new').addEventListener('click', () => { S.adm.user = { email: '', name: '', role: 'editor', active: 'Y' }; render(); });
   v.querySelectorAll('[data-u]').forEach(tr => tr.addEventListener('click', () => { S.adm.user = Object.assign({ _edit: true }, M.users.find(u => u.email === tr.dataset.u)); render(); }));
   if (U) {

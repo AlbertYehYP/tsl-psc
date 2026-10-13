@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.1';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -298,7 +298,8 @@ var PSC = (function () {
     { key: 'tmou_white_flags', value: 'MARSHALL,MARSHALL ISLANDS,SINGAPORE', note: 'Tokyo MOU 白名單船旗（估算 SRP 用，每年 7 月依 Tokyo MOU 公告更新）' },
     { key: 'tmou_black_flags', value: '', note: 'Tokyo MOU 黑名單船旗（估算 SRP 用）' },
     { key: 'window_alert_days', value: '30', note: '窗口提醒：幾天內將進入窗口或關閉時提醒' },
-    { key: 'alert_emails', value: '', note: '每日 PSC 窗口提醒收件人（逗號分隔）；空白不寄信' }
+    { key: 'alert_emails', value: '', note: '每日 PSC 窗口提醒收件人（逗號分隔）；空白不寄信' },
+    { key: 'nk_class_fields', value: 'class_society,class_number,flag,flag_code,port_of_registry,registered_owner,ism_company,date_of_build,gross_tonnage,deadweight,teu', note: '匯入船舶主檔時以船級（Class）資料為準的欄位：與系統不同時直接改成 Class 的值（例如裝脫硫塔後 TEU 略減）。改名 / 換管理前的舊列只更新建造日期、GT、DWT、TEU' }
   ];
 
   /* ---------------- small helpers ---------------- */
@@ -1051,27 +1052,102 @@ var PSC = (function () {
   var NK_FIELDS = { class_society: 'class_society', class_number: 'class_number', flag: 'flag', flag_code: 'flag_code', port_of_registry: 'port_of_registry',
     ship_type: 'ship_type', ism_company: 'ism_company', registered_owner: 'registered_owner', date_of_build: 'date_of_build', gross_tonnage: 'gross_tonnage',
     deadweight: 'deadweight', teu: 'teu', builder: 'builder', data_source_date: 'nk_data_date' };
-  /** 匯入船舶履歷監控系統的 NK SHIP 物件（survey-status-schema v2），可一次多艘 */
+  /** 主檔值與系統現值是否視為相同（數字 37407 = 37407.0；船旗 Marshall = Marshall Islands） */
+  function sameNK(field, a, b) {
+    a = s(a); b = s(b);
+    if (a === b || up(a) === up(b)) return true;
+    if (a !== '' && b !== '' && !isNaN(Number(a)) && !isNaN(Number(b))) return Number(a) === Number(b);
+    if (field === 'flag' || field === 'port_of_registry') { var x = normCountry(a), y = normCountry(b); return x === y || x.indexOf(y + ' ') === 0 || y.indexOf(x + ' ') === 0; }
+    return false;
+  }
+  /** 船隊監控系統的 fleet-data.js（window.FLEET = {...}）或 SHIP JSON → SHIP 陣列，只留本系統用得到的欄位 */
+  function parseFleetFile(text) {
+    text = s(text).replace(/^﻿/, '');
+    var t = text.trim(), obj = null;
+    if (/^[\[{]/.test(t)) { try { obj = JSON.parse(t); } catch (e) { obj = null; } }
+    if (!obj) {
+      var at = text.search(/window\.FLEET\s*=/);
+      if (at < 0) { if (/^[\[{]/.test(t)) JSON.parse(t); throw new Error('看不懂這個檔案：請選 SHIP JSON，或船隊監控系統的 fleet-data.js'); }
+      // 逐字掃描：跳過註解、去掉結尾逗號，直到 FLEET 物件的右大括號（字串內的符號不受影響）
+      var i = text.indexOf('{', at), depth = 0, out = [], inStr = false, esc = false, c, e, j, start = i, flush = function (to) { if (to > start) out.push(text.slice(start, to)); };
+      for (; i < text.length; i++) {
+        c = text.charAt(i);
+        if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+        if (c === '"') { inStr = true; continue; }
+        if (c === '/' && (text.charAt(i + 1) === '*' || text.charAt(i + 1) === '/')) {
+          flush(i); e = text.charAt(i + 1) === '*' ? text.indexOf('*/', i + 2) + 2 : text.indexOf('\n', i);
+          if (e < 2) e = text.length; start = e; i = e - 1; continue;
+        }
+        if (c === '}' || c === ']') {
+          flush(i); start = i;
+          for (j = out.length - 1; j >= 0; j--) { var tr = out[j].replace(/\s+$/, ''); if (tr === '') { out.pop(); continue; } out[j] = tr.replace(/,$/, ''); break; }
+        }
+        if (c === '{' || c === '[') depth++;
+        else if (c === '}' || c === ']') { depth--; if (depth === 0) { flush(i + 1); break; } }
+      }
+      obj = JSON.parse(out.join(''));
+    }
+    var list = Array.isArray(obj) ? obj : obj.vessel_master ? [obj] : Array.isArray(obj.ships) ? obj.ships : Object.keys(obj).map(function (k) { return obj[k]; });
+    return list.filter(function (sh) { return sh && sh.vessel_master && s(sh.vessel_master.imo_number); }).map(function (sh) {
+      var vm = { vessel_name: sh.vessel_master.vessel_name, imo_number: s(sh.vessel_master.imo_number) };
+      Object.keys(NK_FIELDS).forEach(function (k) { if (sh.vessel_master[k] !== undefined) vm[k] = sh.vessel_master[k]; });
+      return { vessel_master: vm,
+        certificates: (sh.certificates || []).map(function (c) { return { cert_code: c.cert_code, cert_name: c.cert_name, expiry_date: c.expiry_date }; }),
+        surveys: (sh.surveys || []).map(function (x) { return { label: x.label, kind: x.kind, next: x.next, due: x.due, from: x.from, to: x.to, alt_from: x.alt_from, alt_to: x.alt_to, last: x.last }; }),
+        conditions: sh.conditions || {} };
+    });
+  }
+  var SHIP_CONST = { date_of_build: 1, gross_tonnage: 1, deadweight: 1, teu: 1, builder: 1 };
+  /** 匯入船舶履歷監控系統的 NK SHIP 物件（survey-status-schema v2），可一次多艘。
+   *  mode 'class'（預設）：設定 nk_class_fields 列的欄位以 Class 資料為準，其餘只補空白；
+   *  'fill' 只補空白；'overwrite' 全部以主檔覆蓋。不同值都列入 conflicts（applied 表示已改）。
+   *  改名 / 換管理前的舊列（有失效日）只更新船舶本身不變的欄位（建造日期、GT、DWT、TEU、造船廠）。 */
   function importNK(store, user, p) {
     need(user, 'editor');
-    var ships = Array.isArray(p.ships) ? p.ships : [p.ships], done = [];
+    var ships = Array.isArray(p.ships) ? p.ships : [p.ships], done = [], skipped = [], conflicts = [], filled = 0, filledBy = {}, nkRows = {};
+    var mode = p.mode === 'overwrite' || p.mode === 'fill' ? p.mode : 'class', vessels = store.all('Vessels'), classF = {};
+    s(settingsMap(store).nk_class_fields).split(',').forEach(function (f) { if (s(f)) classF[s(f)] = 1; });
+    var lastSrc = {}; store.all('NKStatus').forEach(function (r) { if (s(r.source_date) > (lastSrc[r.imo] || '')) lastSrc[r.imo] = s(r.source_date); });
     ships.forEach(function (sh) {
       var vm = (sh && sh.vessel_master) || {}, imo = s(vm.imo_number).replace(/^'/, '');
       if (!imo) return;
-      if (!store.all('Vessels').some(function (v) { return s(v.imo) === imo; })) throw new Error('船隊資料沒有 IMO ' + imo + '（' + vm.vessel_name + '），請先在系統管理新增船舶');
-      var patch = {};
-      Object.keys(NK_FIELDS).forEach(function (k) { if (vm[k] !== undefined && vm[k] !== null && s(vm[k]) !== '') patch[NK_FIELDS[k]] = DATE_FIELDS[NK_FIELDS[k]] ? isoDate(vm[k]) : s(vm[k]); });
-      store.updateWhere('Vessels', function (v) { return s(v.imo) === imo; }, patch);
+      var mine = vessels.filter(function (v) { return s(v.imo) === imo; });
+      if (!mine.length) {
+        if (ships.length === 1) throw new Error('船隊資料沒有 IMO ' + imo + '（' + vm.vessel_name + '），請先在系統管理新增船舶');
+        skipped.push(up(vm.vessel_name) + ' ' + imo); return;
+      }
+      var master = {};
+      Object.keys(NK_FIELDS).forEach(function (k) { if (vm[k] !== undefined && vm[k] !== null && s(vm[k]) !== '') master[NK_FIELDS[k]] = DATE_FIELDS[NK_FIELDS[k]] ? isoDate(vm[k]) : s(vm[k]); });
+      var nFill = 0;
+      mine.forEach(function (row) {
+        var patch = {};
+        var old = s(row.valid_to) !== '';
+        Object.keys(master).forEach(function (f) {
+          var cur = s(row[f]);
+          if (f === 'nk_data_date') { if (cur !== master[f]) patch[f] = master[f]; return; }
+          if (cur === '') { if (!old || SHIP_CONST[f]) { patch[f] = master[f]; nFill++; filledBy[f] = (filledBy[f] || 0) + 1; } return; }
+          if (sameNK(f, cur, master[f])) return;
+          var apply = (mode === 'overwrite' || (mode === 'class' && classF[f])) && (!old || SHIP_CONST[f]);
+          conflicts.push({ vessel: row.vessel, imo: imo, field: f, current: cur, master: master[f], applied: apply, former: old, minor: !apply && f === 'builder' && /[㐀-鿿]/.test(cur) });
+          if (apply) patch[f] = master[f];
+        });
+        if (Object.keys(patch).length) store.updateWhere('Vessels', function (v) { return s(v.imo) === imo && s(v.vessel) === s(row.vessel) && s(v.valid_from) === s(row.valid_from); }, patch);
+      });
+      filled += nFill;
       var src = isoDate(vm.data_source_date), rows = [];
+      if (src && lastSrc[imo] && src < lastSrc[imo]) { done.push(up(vm.vessel_name) + '（補 ' + nFill + ' 欄；系統的檢驗資料較新，未覆蓋）'); return; }
       (sh.certificates || []).forEach(function (c) { rows.push({ imo: imo, kind: 'cert', code: s(c.cert_code), label: s(c.cert_name), next: '', due: '', from: '', to: '', alt_from: '', alt_to: '', expiry: isoDate(c.expiry_date), last: '', source_date: src }); });
       (sh.surveys || []).forEach(function (x) { rows.push({ imo: imo, kind: 'survey', code: s(x.kind), label: s(x.label), next: x.next ? 'Y' : 'N', due: isoDate(x.due), from: isoDate(x.from), to: isoDate(x.to), alt_from: isoDate(x.alt_from), alt_to: isoDate(x.alt_to), expiry: '', last: isoDate(x.last), source_date: src }); });
       var cond = sh.conditions || {};
       Object.keys(cond).forEach(function (k) { rows.push({ imo: imo, kind: 'condition', code: k, label: s(cond[k]), next: '', due: '', from: '', to: '', alt_from: '', alt_to: '', expiry: '', last: '', source_date: src }); });
-      store.replaceWhere('NKStatus', 'imo', imo, rows);
-      done.push(up(vm.vessel_name) + '（' + rows.length + ' 筆檢驗 / 證書）');
+      nkRows[imo] = rows;
+      done.push(up(vm.vessel_name) + '（補 ' + nFill + ' 欄、' + rows.length + ' 筆檢驗 / 證書）');
     });
-    audit(store, user, 'import_nk', done.join('、'), '');
-    return { imported: done };
+    var imos = Object.keys(nkRows);
+    if (imos.length && store.replaceMany) store.replaceMany('NKStatus', 'imo', imos, [].concat.apply([], imos.map(function (k) { return nkRows[k]; })));
+    else imos.forEach(function (k) { store.replaceWhere('NKStatus', 'imo', k, nkRows[k]); });
+    audit(store, user, 'import_nk', mode + '：' + done.length + ' 艘、補 ' + filled + ' 欄、依主檔更新 ' + conflicts.filter(function (c) { return c.applied; }).length + ' 項、未變更差異 ' + conflicts.filter(function (c) { return !c.applied; }).length + ' 項', done.join('、').slice(0, 1800));
+    return { imported: done, mode: mode, filled: filled, filledBy: filledBy, conflicts: conflicts, skipped: skipped };
   }
 
   function bootstrap(store, user) {
@@ -1139,7 +1215,7 @@ var PSC = (function () {
     deadlines: deadlines, pscTier: pscTier, vesselAt: vesselAt, handle: handle,
     BRIBE_FIELDS: BRIBE_FIELDS, parseBribe: parseBribe, bribeFlag: bribeFlag, canBribe: canBribe, num: num,
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
-    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS,
+    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, sameNK: sameNK,
     TOKYO: TOKYO, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
     incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
     DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,
