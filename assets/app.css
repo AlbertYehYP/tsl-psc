@@ -10,6 +10,7 @@
   --f-sans:"Nunito Sans","Noto Sans TC",system-ui,-apple-system,"Segoe UI","PingFang TC","Microsoft JhengHei",sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
   --r:12px; --fx-d:10px;
+  --rk-vl:#b42318; --rk-vl-soft:#fde4e1; --rk-l:#c4590a; --rk-l-soft:#fdebd9; --rk-m:#8a6a00; --rk-m-soft:#fbf1cc; --rk-h:#2f7d32; --rk-h-soft:#e1f2dc;
 }
 :root[data-theme="sand"]{
   --bg:#f6f1e9; --surface:#fffdf8; --surface-2:#f5eee3; --ink:#2e2620; --ink-2:#5c4f44; --muted:#968a7c;
@@ -24,12 +25,14 @@
   --line:#e1e6ee; --line-2:#ccd4e0; --accent:#3a6db0; --accent-soft:#e2eaf6; --accent-ink:#ffffff;
   --s1:#4a84cc; --s2:#ee8a5c; --track:#e7ecf3; --land:#e3e8ef; --land-line:#cbd3df; --sea:#eef3f9}
 :root[data-theme="night"]{
+  --rk-vl:#ff8a7a; --rk-vl-soft:#4a1f1a; --rk-l:#ffb067; --rk-l-soft:#4a2e14; --rk-m:#f2cf63; --rk-m-soft:#3d3416; --rk-h:#8fd67f; --rk-h-soft:#1f3a1d;
   --heat-1:#5a2508; --heat-2:#b8420c; --heat-3:#f47a1f; --heat-4:#fbbf24; --heat-5:#fff3a3;
   --bg:#111816; --surface:#19211f; --surface-2:#1e2725; --ink:#e4ebe8; --ink-2:#b2bfba; --muted:#7c8a86;
   --line:#26312e; --line-2:#33403c; --accent:#6cc2b9; --accent-soft:#1d3532; --accent-ink:#0f1614;
   --s1:#56b0a6; --s2:#dda061; --track:#222b29; --crit:#ee8470; --crit-soft:#3a231f; --good:#8cc97a; --warn-ink:#efc56d; --warn-soft:#382e1c;
   --land:#232d2b; --land-line:#34413d; --sea:#151d1b; --shadow:0 0 0 1px rgba(255,255,255,.06); color-scheme:dark}
 @media (prefers-color-scheme: dark){:root:not([data-theme]){
+  --rk-vl:#ff8a7a; --rk-vl-soft:#4a1f1a; --rk-l:#ffb067; --rk-l-soft:#4a2e14; --rk-m:#f2cf63; --rk-m-soft:#3d3416; --rk-h:#8fd67f; --rk-h-soft:#1f3a1d;
   --heat-1:#5a2508; --heat-2:#b8420c; --heat-3:#f47a1f; --heat-4:#fbbf24; --heat-5:#fff3a3;
   --bg:#111816; --surface:#19211f; --surface-2:#1e2725; --ink:#e4ebe8; --ink-2:#b2bfba; --muted:#7c8a86;
   --line:#26312e; --line-2:#33403c; --accent:#6cc2b9; --accent-soft:#1d3532; --accent-ink:#0f1614;
@@ -183,6 +186,21 @@ tr.click:hover td{background:var(--surface-2)}
 .vcard .zh{font-size:12px;color:var(--muted)}
 .vcard .st{display:flex;gap:12px;font-size:12px;color:var(--ink-2);flex-wrap:wrap}
 .vcard .st b{color:var(--ink);font-weight:600}
+/* Tokyo MOU 績效色標：卡片左側色條＋淡底色 */
+.rk{display:inline-flex;align-items:center;border-radius:4px;padding:0 7px;font-size:11.5px;font-weight:600;white-space:nowrap;line-height:1.75}
+.rk-vl{background:var(--rk-vl-soft);color:var(--rk-vl)}.rk-l{background:var(--rk-l-soft);color:var(--rk-l)}.rk-m{background:var(--rk-m-soft);color:var(--rk-m)}.rk-h{background:var(--rk-h-soft);color:var(--rk-h)}
+.vcard[class*="risk-"]{box-shadow:var(--shadow),inset 4px 0 0 var(--rk)}
+.vcard.risk-vl{--rk:var(--rk-vl);background:linear-gradient(90deg,var(--rk-vl-soft),var(--surface) 70%)}
+.vcard.risk-l{--rk:var(--rk-l);background:linear-gradient(90deg,var(--rk-l-soft),var(--surface) 70%)}
+.vcard.risk-m{--rk:var(--rk-m);background:linear-gradient(90deg,var(--rk-m-soft),var(--surface) 70%)}
+.vcard.risk-h{--rk:var(--rk-h)}
+.vcard[class*="risk-"]:hover{box-shadow:inset 4px 0 0 var(--rk),0 0 0 1.5px var(--accent)}
+.vcard .rkline{align-items:center;gap:4px 8px}
+.perf-legend{margin-bottom:12px;display:grid;gap:8px;padding:12px 16px}
+.perf-legend .pl-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
+.perf-legend .pl-sel{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2)}
+.perf-legend select{border:1px solid var(--line-2);border-radius:8px;background:var(--surface);padding:3px 8px}
+.perf-t td{vertical-align:top}
 .vprof-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 18px;margin-top:12px}
 .facts div{min-width:0}

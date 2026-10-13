@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.2.1';
+  var VERSION = '1.3.0';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -295,8 +295,15 @@ var PSC = (function () {
     { key: 'bribe_roles', value: 'admin,editor', note: '可以查看與登錄 Bribe（索賄）資料的角色' },
     { key: 'tmou_members', value: 'AUSTRALIA,CANADA,CHILE,CHINA,FIJI,HONG KONG,INDONESIA,JAPAN,SOUTH KOREA,MALAYSIA,MARSHALL ISLANDS,MEXICO,NEW ZEALAND,PANAMA,PAPUA NEW GUINEA,PERU,PHILIPPINES,RUSSIA,SINGAPORE,THAILAND,VANUATU,VIETNAM', note: '備援用：檢查的 MOU 欄空白時，才用這份 Tokyo MOU 成員國清單判定（正式判定看 MOUMap 對照表）' },
     { key: 'risk_inbox_folder_id', value: '', note: 'Tokyo MOU 窗口檔收件匣資料夾 ID；空白時第一次執行自動建立「Tokyo MOU 收件匣」' },
-    { key: 'tmou_white_flags', value: 'MARSHALL,MARSHALL ISLANDS,SINGAPORE', note: 'Tokyo MOU 白名單船旗（估算 SRP 用，每年 7 月依 Tokyo MOU 公告更新）' },
-    { key: 'tmou_black_flags', value: '', note: 'Tokyo MOU 黑名單船旗（估算 SRP 用）' },
+    { key: 'tmou_white_flags', value: 'Kuwait; Antigua and Barbuda; United States of America; Tuvalu; United Kingdom (UK); France; Indonesia; Cyprus; Panama; Viet Nam; Bermuda (UK); Thailand; Portugal; Germany; Saudi Arabia; Cayman Islands (UK); Liberia; Japan; Greece; Denmark; Malta; Philippines; Malaysia; Bahamas; Marshall Islands; Norway; Isle of Man (UK); Taiwan, China; Korea, Republic of; Singapore; Hong Kong, China; China', note: 'Tokyo MOU 船旗績效 High 名單（2026-07-01 ~ 2027-06-30；估算 SRP 用；以分號分隔；每年 7 月依 Tokyo MOU 公告更新）' },
+    { key: 'tmou_black_flags', value: 'Gambia; Saint Kitts and Nevis; Cameroon; Togo; Tanzania; Sao Tome and Principe; Palau; Iran; Cook Islands; Sierra Leone; Comoros; Mongolia; Sint Maarten; Djibouti; Belize', note: 'Tokyo MOU 船旗績效 Low 名單（2026-07-01 ~ 2027-06-30；估算 SRP 用；以分號分隔）' },
+    { key: 'tmou_ro_high', value: 'Biro Klasifikasi Indonesia; Indian Register of Shipping; Overseas Marine Certification Services; Panama Maritime Documentation Services; Intermaritime Certification Services, S.A.; Russian Maritime Register of Shipping; Isthmus Bureau of Shipping; Vietnam Register; CR Classification Society; RINA Services S.p.A.; Nippon Kaiji Kyokai; Bureau Veritas; Lloyd\'s Register; DNV AS; Korean Register; China Classification Society; American Bureau of Shipping', note: 'Tokyo MOU RO 績效 High（2026-07-01 ~ 2027-06-30；以分號分隔；船級簡稱 NK、LR、DNV、CR 等會自動對應）' },
+    { key: 'tmou_ro_low', value: 'Cosmos Marine Bureau; Union Bureau of Shipping; Asia Shipping Certification Services', note: 'Tokyo MOU RO 績效 Low（2026-07-01 ~ 2027-06-30）' },
+    { key: 'tmou_avg_detention_index', value: '3.84', note: 'Tokyo MOU 平均留置指數（%），公司績效與船舶風險色標用；2027-06-30 前有效，每年 7 月依 NIR 頁更新' },
+    { key: 'tmou_avg_deficiency_index', value: '2.64', note: 'Tokyo MOU 平均缺失指數，公司績效與船舶風險色標用；2027-06-30 前有效' },
+    { key: 'tmou_index_valid', value: '2026-07-01 ~ 2027-06-30', note: '上面兩個平均指數與船旗 / RO 名單的適用期間（顯示用）' },
+    { key: 'tmou_high_perf_docs', value: '0002568,0033914,0064704,0081371,0101856,0104949,0175853,0198232,0217944,0235574,0237394,0255909,0260422,0261139,0283257,0283610,0296139,0296519,0297888,0301095,0310062,0340747,0349961,0367129,0415893,0516936,0525801,0601831,0606585,0645521,0694657,0717669,0724192,0770470,0798451,0919307,0993927,1015045,1038073,1039244,1043989,1069901,1070250,1092934,1125205,1138807,1204098,1249148,1314037,1314173,1321453,1335815,1393349,1425380,1474936,1475280,1509526,1520088,1540341,1546779,1562592,1578540,1595534,1601573,1618912,1626767,1627986,1636114,1648580,1677771,1708734,1724178,1743141,1834165,1866320,1870450,1881539,1889477,1890038,1966806,1983906,4090777,4115119,4157892,5011009,5014361,5034289,5045513,5070349,5077381,5088399,5089202,5104797,5105614,5113282,5122042,5146431,5148424,5177178,5177491,5184254,5193283,5193805,5197683,5199852,5201298,5201369,5203250,5230767,5261954,5280724,5281268,5290080,5291397,5307331,5315756,5332992,5348114,5356321,5362413,5370149,5373608,5375992,5634079,5676362,5757212,5762575,5762592,5778037,5796603,5801998,5805298,5816037,5829126,5875611,5879984,5880559,5887220,5900552,5903614,5912498,5926452,5936683,5946751,5993395,6018114,6018202,6028124,6028950,6050128,6050193,6055146,6059872,6071296,6091771,6100545,6137904,6146902,6156311,6161966,6197791,6200394,6241591,6253841,6264452,6271128,6280758,6292031,6301781,6324712,6325358,6350563,6368083,6369974,6376154,6406769,6410094,6411089,6427243,6427416,6431581,6464624,6483266,6487842', note: 'Tokyo MOU 高績效公司名單（ISM DOC 公司 IMO，逗號分隔）' },
+    { key: 'tmou_high_perf_period', value: '2026 Q3', note: '高績效公司名單的季度（顯示用）' },
     { key: 'window_alert_days', value: '30', note: '窗口提醒：幾天內將進入窗口或關閉時提醒' },
     { key: 'alert_emails', value: '', note: '每日 PSC 窗口提醒收件人（逗號分隔）；空白不寄信' },
     { key: 'nk_class_fields', value: 'class_society,class_number,flag,flag_code,port_of_registry,registered_owner,ism_company,date_of_build,gross_tonnage,deadweight,teu', note: '匯入船舶主檔時以船級（Class）資料為準的欄位：與系統不同時直接改成 Class 的值（例如裝脫硫塔後 TEU 略減）。改名 / 換管理前的舊列只更新建造日期、GT、DWT、TEU' }
@@ -842,6 +849,54 @@ var PSC = (function () {
     out.days_to_open = daysBetween(t, out.from); out.days_to_close = daysBetween(t, out.to);
     return out;
   }
+  /** 名單欄位：有分號或換行就用它們分隔（名稱本身可含逗號，如 Taiwan, China），否則用逗號 */
+  function nameList(v) { v = s(v); return v.split(/[;\n]/.test(v) ? /[;\n]/ : /,/).map(function (x) { return s(x); }).filter(function (x) { return x; }); }
+  var FLAG_ALIAS = { 'MARSHALL': 'MARSHALL ISLANDS', 'MHL': 'MARSHALL ISLANDS', 'TAIWAN, CHINA': 'TAIWAN', 'TAIWAN, REPUBLIC OF CHINA': 'TAIWAN', 'REPUBLIC OF CHINA': 'TAIWAN', 'ROC': 'TAIWAN', 'R.O.C.': 'TAIWAN', 'TWN': 'TAIWAN', 'CHINESE TAIPEI': 'TAIWAN',
+    'HONG KONG, CHINA': 'HONG KONG', 'KOREA, REPUBLIC OF': 'KOREA', 'SOUTH KOREA': 'KOREA', 'REPUBLIC OF KOREA': 'KOREA', 'VIET NAM': 'VIETNAM', 'TÜRKIYE': 'TURKIYE', 'TURKEY': 'TURKIYE',
+    'UNITED STATES OF AMERICA': 'USA', 'UNITED STATES': 'USA', 'UNITED KINGDOM': 'UK', 'RUSSIAN FEDERATION': 'RUSSIA', 'SGP': 'SINGAPORE' };
+  function flagKey(x) { var k = up(x).replace(/\s*\((UK|1)\)\s*/g, ' ').replace(/\s+/g, ' ').trim(); return FLAG_ALIAS[k] || k; }
+  var RO_ALIAS = { 'NK': 'NIPPON KAIJI KYOKAI', 'CLASSNK': 'NIPPON KAIJI KYOKAI', 'LR': "LLOYD'S REGISTER", 'DNV': 'DNV AS', 'DNV GL': 'DNV AS', 'CR': 'CR CLASSIFICATION SOCIETY',
+    'ABS': 'AMERICAN BUREAU OF SHIPPING', 'BV': 'BUREAU VERITAS', 'KR': 'KOREAN REGISTER', 'CCS': 'CHINA CLASSIFICATION SOCIETY', 'RINA': 'RINA SERVICES S.P.A.', 'VR': 'VIETNAM REGISTER',
+    'IRS': 'INDIAN REGISTER OF SHIPPING', 'RS': 'RUSSIAN MARITIME REGISTER OF SHIPPING', 'RMRS': 'RUSSIAN MARITIME REGISTER OF SHIPPING', 'PRS': 'POLSKI REJESTR STATKOW', 'BKI': 'BIRO KLASIFIKASI INDONESIA' };
+  function roKey(x) { var k = up(x).replace(/\s+/g, ' ').trim(); return RO_ALIAS[k] || k; }
+  /** 船旗 / RO 在 Tokyo MOU 年度名單的績效：HIGH / LOW / MEDIUM（不在兩份名單）/ ''（沒資料） */
+  function listPerf(value, high, low, key) {
+    if (!s(value)) return '';
+    var k = key(value), inList = function (l) { return nameList(l).some(function (x) { return key(x) === k; }); };
+    return inList(high) ? 'HIGH' : inList(low) ? 'LOW' : 'MEDIUM';
+  }
+  function flagPerf(flag, set) { set = set || {}; return listPerf(flag, set.tmou_white_flags, set.tmou_black_flags, flagKey); }
+  function roPerf(ro, set) { set = set || {}; return listPerf(ro, set.tmou_ro_high, set.tmou_ro_low, roKey); }
+  /** Tokyo MOU 平均指數（設定值；預設 2026-07-01 ~ 2027-06-30 公告值） */
+  function tmouAvg(set) {
+    set = set || {}; var d = function (k) { return DEFAULT_SETTINGS.filter(function (x) { return x.key === k; })[0].value; };
+    var det = Number(s(set.tmou_avg_detention_index).replace('%', '')), def = Number(set.tmou_avg_deficiency_index);
+    return { det: isFinite(det) && s(set.tmou_avg_detention_index) !== '' ? det : Number(d('tmou_avg_detention_index')), def: isFinite(def) && s(set.tmou_avg_deficiency_index) !== '' ? def : Number(d('tmou_avg_deficiency_index')), valid: s(set.tmou_index_valid) || d('tmou_index_valid') };
+  }
+  var PERF_MATRIX = { 'above|above': 'VERY LOW', 'above|average': 'LOW', 'above|below': 'LOW', 'average|above': 'LOW', 'below|above': 'LOW',
+    'average|average': 'MEDIUM', 'average|below': 'MEDIUM', 'below|average': 'MEDIUM', 'below|below': 'HIGH' };
+  /**
+   * Tokyo MOU 公司績效算法（NIR information sheet §3），可用於一艘船、一家管理公司或整個船隊：
+   * 缺失比 = (ISM 缺失 × 5 + 非 ISM 缺失) ÷ 檢查次數；留置率 = 留置次數 ÷ 檢查次數。
+   * 與 Tokyo MOU 平均比較：缺失比高 / 低於平均 1 以上、留置率高 / 低於平均 1 個百分點以上，為 above / below，其餘 average；
+   * 再依績效矩陣得 VERY LOW / LOW / MEDIUM / HIGH。
+   * insps：[{ detention:'Y' 或 det:true, def_count, defs:[{code}] }]
+   */
+  function perfIndex(insps, avg) {
+    avg = avg || tmouAvg();
+    var n = 0, ism = 0, non = 0, det = 0;
+    (insps || []).forEach(function (i) {
+      n++; if (i.det === true || yes(i.detention)) det++;
+      var ds = i.defs || [];
+      ds.forEach(function (d) { if (normCode(d.code).slice(0, 2) === '15') ism++; else non++; });
+      var extra = (Number(i.def_count) || 0) - ds.length; if (extra > 0) non += extra;
+    });
+    if (!n) return { n: 0, ism: 0, non: 0, det: 0, def_ratio: null, det_rate: null, def_level: '', det_level: '', performance: '' };
+    var dr = (ism * 5 + non) / n, rate = det / n * 100;
+    var lv = function (v, a, band) { return v > a + band ? 'above' : v < a - band ? 'below' : 'average'; };
+    var dl = lv(dr, avg.def, 1), tl = lv(rate, avg.det, 1);
+    return { n: n, ism: ism, non: non, det: det, def_ratio: dr, det_rate: rate, def_level: dl, det_level: tl, performance: PERF_MATRIX[tl + '|' + dl] };
+  }
   /**
    * 估算 SRP（僅供核對，官方等級以 Tokyo MOU 為準）。
    * HRS：貨櫃船 2 點、船齡 > 12 年 1 點、黑名單船旗 1 點、公司績效 Low / Very Low 2 點、36 個月內每一次缺失 > 5 項的檢查 1 點、留置 ≥ 3 次 1 點；合計 ≥ 4 點為 HRS。
@@ -854,8 +909,11 @@ var PSC = (function () {
     var pts = 2, why = ['貨櫃船 +2'];
     var age = o.date_of_build ? daysBetween(o.date_of_build, today) / 365.25 : null;
     if (age !== null && age > 12) { pts += 1; why.push('船齡 ' + age.toFixed(1) + ' 年 > 12 +1'); }
-    var flag = up(o.flag), white = (o.whiteFlags || []).indexOf(flag) >= 0, black = (o.blackFlags || []).indexOf(flag) >= 0;
-    if (black) { pts += 1; why.push('黑名單船旗 +1'); }
+    var fk = flagKey(o.flag), has = function (l, key, k) { return (l || []).some(function (x) { return key(x) === k; }); };
+    var white = has(o.whiteFlags, flagKey, fk), black = has(o.blackFlags, flagKey, fk);
+    if (black) { pts += 1; why.push('船旗績效 Low +1'); }
+    var rk = roKey(o.ro), roHigh = !s(o.ro) || !(o.roHigh || []).length || has(o.roHigh, roKey, rk), roLow = s(o.ro) && has(o.roLow, roKey, rk);
+    if (roLow) { pts += 1; why.push('RO 績效 Low +1'); }
     var cp = up(o.company_performance);
     if (cp === 'LOW' || cp === 'VERY LOW') { pts += 2; why.push('公司績效 ' + o.company_performance + ' +2'); }
     var big = ins.filter(function (i) { return Number(i.def_count) > 5; });
@@ -863,7 +921,8 @@ var PSC = (function () {
     var det = ins.filter(function (i) { return s(i.detention) === 'Y'; }).length;
     if (det >= 3) { pts += 1; why.push('留置 ' + det + ' 次 +1'); }
     var lrsMiss = [];
-    if (!white) lrsMiss.push('船旗不在白名單');
+    if (!white) lrsMiss.push('船旗不在 High 名單');
+    if (!roHigh) lrsMiss.push('船級（RO）不在 High 名單');
     if (cp !== 'HIGH') lrsMiss.push('公司績效不是 High');
     if (!ins.length) lrsMiss.push('36 個月內無 Tokyo MOU 檢查');
     if (big.length) lrsMiss.push('有缺失 > 5 項的檢查');
@@ -887,7 +946,8 @@ var PSC = (function () {
       var r = risk[s(v.imo)] || {};
       var w = tmouWindow(db.inspections, v.imo, r.srp, t, mem);
       var est = estimateSRP({ imo: v.imo, today: t, inspections: db.inspections, members: mem, date_of_build: v.date_of_build, flag: v.flag,
-        whiteFlags: listOf(set.tmou_white_flags), blackFlags: listOf(set.tmou_black_flags), company_performance: r.company_performance });
+        whiteFlags: nameList(set.tmou_white_flags), blackFlags: nameList(set.tmou_black_flags), ro: v.class_society, roHigh: nameList(set.tmou_ro_high), roLow: nameList(set.tmou_ro_low),
+        company_performance: r.company_performance });
       var alerts = [];
       (nk[s(v.imo)] || []).forEach(function (x) {
         var end = x.kind === 'cert' ? x.expiry : (x.due || x.to);
@@ -1199,6 +1259,7 @@ var PSC = (function () {
       case 'saveUser': return adminSave(store, user, 'Users', 'email', payload);
       case 'saveVessel': return adminSave(store, user, 'Vessels', 'imo', payload);
       case 'saveSetting': return adminSave(store, user, 'Settings', 'key', payload);
+      case 'saveSettings': return (payload.rows || []).map(function (r) { return adminSave(store, user, 'Settings', 'key', r); });
       case 'importRisk': return store.lock(function () { return importRisk(store, user, payload); });
       case 'importNK': return store.lock(function () { return importNK(store, user, payload); });
       case 'validateData': return validateData(bootstrap(store, user));
@@ -1215,7 +1276,7 @@ var PSC = (function () {
     deadlines: deadlines, pscTier: pscTier, vesselAt: vesselAt, handle: handle,
     BRIBE_FIELDS: BRIBE_FIELDS, parseBribe: parseBribe, bribeFlag: bribeFlag, canBribe: canBribe, num: num,
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
-    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, sameNK: sameNK,
+    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
     TOKYO: TOKYO, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
     incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
     DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,

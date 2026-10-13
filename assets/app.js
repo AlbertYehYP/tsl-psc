@@ -395,17 +395,58 @@ async function copyCSV(rows) {
 }
 
 /* ---------- view: vessels ---------- */
+/** Tokyo MOU 公司績效等級 → 色標（績效低 = 風險高） */
+const PERF_META = { 'VERY LOW': { c: 'vl', t: '高風險', e: 'Very Low' }, 'LOW': { c: 'l', t: '偏高風險', e: 'Low' }, 'MEDIUM': { c: 'm', t: '一般', e: 'Medium' }, 'HIGH': { c: 'h', t: '低風險', e: 'High' } };
+const PERF_ORDER = { 'VERY LOW': 0, 'LOW': 1, 'MEDIUM': 2, 'HIGH': 3 };
+const perfPill = (p, txt) => { const m = PERF_META[String(p || '').toUpperCase()]; return m ? `<span class="rk rk-${m.c}">${txt || m.t + '・' + m.e}</span>` : '<span class="dim">—</span>'; };
+const LIST_PERF = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
+const LEVEL_TXT = { above: '高於平均', average: '平均', below: '低於平均' };
+const fix2 = v => v === null || v === undefined ? '—' : Number(v).toFixed(2);
+/** 計算基礎：依目前篩選，或近 36 個月 Tokyo MOU 檢查（與 Tokyo MOU 官方算法相同） */
+function perfBase(c) {
+  if (S.perfBasis !== '36m') return c.insp;
+  const d = new Date(today() + 'T00:00:00'); d.setMonth(d.getMonth() - 36); const from = d.toISOString().slice(0, 10);
+  return M.insp.filter(I => I.date >= from && I.mou === PSC.TOKYO);
+}
+function companyPerfHTML(c, avg) {
+  const base = perfBase(c), by = {};
+  base.forEach(I => { (by[I.company] || (by[I.company] = [])).push(I); });
+  const cur = PSC.currentVessels(M.vessels, today()), ships = {}; cur.forEach(v => { ships[v.company] = (ships[v.company] || 0) + 1; });
+  const hp = new Set(PSC.nameList(M.settings.tmou_high_perf_docs).map(x => x.replace(/\D/g, '')));
+  const hpPer = M.settings.tmou_high_perf_period || '';
+  const NAME = { FLEET: 'Fleet Management（FML）', VSHIPS: 'V.Ships', BSM: 'Bernhard Schulte（BSM）', TSL: 'T.S. Lines（自管）', TEH: 'Teh Shipping（自管）' };
+  const cos = M.companies.length ? M.companies : Object.keys(by).map(code => ({ code }));
+  const row = (label, sub, ins, extra) => { const r = PSC.perfIndex(ins, avg); return `<tr><td><b>${label}</b>${sub ? `<div class="dim" style="font-size:11.5px">${sub}</div>` : ''}</td>${extra.ships}<td class="n">${r.n || '–'}</td><td class="n">${r.n ? fix2(r.def_ratio) : '–'}<div class="dim" style="font-size:11px">${r.n ? LEVEL_TXT[r.def_level] : ''}</div></td><td class="n">${r.n ? r.det_rate.toFixed(1) + '%' : '–'}<div class="dim" style="font-size:11px">${r.n ? LEVEL_TXT[r.det_level] : ''}</div></td><td>${r.n ? perfPill(r.performance) : '<span class="dim">無檢查</span>'}</td>${extra.tail}</tr>`; };
+  const body = cos.map(co => {
+    const off = co.tmou_performance ? `${perfPill(co.tmou_performance, PERF_META[String(co.tmou_performance).toUpperCase()] ? PERF_META[String(co.tmou_performance).toUpperCase()].e : co.tmou_performance)}<div class="dim" style="font-size:11px">${dfmt(co.perf_as_of)}</div>` : '<span class="dim">未匯入</span>';
+    const inHp = co.doc_imo && hp.has(String(co.doc_imo).replace(/\D/g, ''));
+    return row(esc(NAME[co.code] || co.name || co.code), `${esc(co.code)}${co.doc_imo ? ' · DOC ' + esc(co.doc_imo) : ''}`, by[co.code] || [], { ships: `<td class="n">${ships[co.code] || '–'}</td>`, tail: `<td>${off}</td><td>${hp.size ? (inHp ? `<span class="rk rk-h">✓ 名單內</span>` : '<span class="dim">—</span>') : '<span class="dim">未設定</span>'}</td>` });
+  }).join('') + row('船隊合計', '', base, { ships: `<td class="n">${cur.length}</td>`, tail: '<td></td><td></td>' });
+  return `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>管理公司績效（Tokyo MOU 公司績效算法）</h2><p class="sub" style="margin:2px 0 0">缺失比 = (ISM 缺失 × 5 + 其他缺失) ÷ 檢查次數；留置率 = 留置 ÷ 檢查次數。與 Tokyo MOU 平均相差超過 1（留置率 1 個百分點）為高於 / 低於平均，再依績效矩陣分級。</p></div></div>
+  <div class="tbl-wrap"><table class="perf-t"><thead><tr><th>管理公司</th><th class="n">現役船</th><th class="n">檢查</th><th class="n">缺失比</th><th class="n">留置率</th><th>系統試算績效</th><th>Tokyo MOU 官方績效</th><th>高績效公司名單${hpPer ? `（${esc(hpPer)}）` : ''}</th></tr></thead><tbody>${body}</tbody></table></div>
+  <p class="note" style="margin:8px 0 0">官方績效取自「PSC 窗口」匯入的 Tokyo MOU 窗口檔，以 36 個月滾動計算；系統試算依上方選擇的期間。自管船分 T.S. Lines 與 Teh Shipping 兩家 DOC 公司。</p></div>`;
+}
 function vVessels(v) {
-  const c = current(), agg = {};
+  const c = current(), agg = {}, avg = PSC.tmouAvg(M.settings);
   c.insp.forEach(I => { const k = vkey(I); const o = agg[k] || (agg[k] = { n: 0, nil: 0, d: 0, last: '', det: 0, open: 0 }); o.n++; if (!I.defs.length) o.nil++; if (I.det) o.det++; if (I.status === ST.OPEN) o.open++; if (I.date > o.last) o.last = I.date; });
   c.defs.forEach(d => { const k = vkey(d); if (agg[k]) agg[k].d++; });
+  const pb = {}; perfBase(c).forEach(I => { (pb[vkey(I)] || (pb[vkey(I)] = [])).push(I); });
+  Object.keys(agg).forEach(k => { agg[k].p = PSC.perfIndex(pb[k] || [], avg); });
   let html = '';
   if (S.profile && M.vreg[S.profile]) html += profileHTML(S.profile, c);
-  const list = Object.entries(agg).map(([k, o]) => ({ k, o, V: M.vreg[k] })).sort((a, b) => b.o.d - a.o.d || b.o.n - a.o.n || (a.V.name < b.V.name ? -1 : 1));
-  html += `<div class="toolbar" style="margin-top:${S.profile ? '18px' : '0'}"><span><b class="num">${list.length}</b> 艘船有 PSC 紀錄（依篩選條件）· 依缺失件數排序</span></div><div class="vgrid">` +
-    (list.length ? list.map(({ k, o, V }) => `<button type="button" class="vcard" data-vc="${esc(k)}"><span class="nm">${esc(V.name)}${o.det ? ` <span class="pill det">留置 ${o.det}</span>` : ''}${o.open ? ` <span class="stp stp-open">進行中 ${o.open}</span>` : ''}</span><span class="zh">${esc(V.zh)}${V.former.length ? ` · 前 ${esc(V.former.join('、'))}` : ''}${V.cur ? ` · ${esc(V.cur.company)}` : ''}</span><span class="st"><span><b class="num">${o.n}</b> 次檢查</span><span><b class="num">${o.d}</b> 項缺失</span><span>NIL ${pct(o.nil, o.n)}</span></span><span class="st dim">最近 ${dfmt(o.last)}</span></button>`).join('') : '<div class="empty">沒有符合條件的船舶</div>') + '</div>';
+  const sorts = { d: (a, b) => b.o.d - a.o.d || b.o.n - a.o.n, risk: (a, b) => (PERF_ORDER[a.o.p.performance] ?? 9) - (PERF_ORDER[b.o.p.performance] ?? 9) || (b.o.p.def_ratio || 0) - (a.o.p.def_ratio || 0), ratio: (a, b) => (b.o.p.def_ratio ?? -1) - (a.o.p.def_ratio ?? -1) };
+  const sk = sorts[S.vSort] ? S.vSort : 'd';
+  const list = Object.entries(agg).map(([k, o]) => ({ k, o, V: M.vreg[k] })).sort((a, b) => sorts[sk](a, b) || (a.V.name < b.V.name ? -1 : 1));
+  const cnt = {}; list.forEach(x => { const p = x.o.p.performance || '—'; cnt[p] = (cnt[p] || 0) + 1; });
+  html += companyPerfHTML(c, avg);
+  html += `<div class="card perf-legend"><div class="pl-row"><span><b class="num">${list.length}</b> 艘船有 PSC 紀錄（依篩選條件）</span><label class="pl-sel">期間 <select id="pf-basis">${opt('filter', '依目前篩選', S.perfBasis !== '36m')}${opt('36m', '近 36 個月 Tokyo MOU（官方算法）', S.perfBasis === '36m')}</select></label><label class="pl-sel">排序 <select id="pf-sort">${opt('d', '缺失件數', sk === 'd')}${opt('risk', '風險（高 → 低）', sk === 'risk')}${opt('ratio', '缺失比', sk === 'ratio')}</select></label></div>
+  <div class="pl-row">${['VERY LOW', 'LOW', 'MEDIUM', 'HIGH'].map(p => `${perfPill(p)}<span class="num dim" style="margin-right:8px">${cnt[p] || 0}</span>`).join('')}${cnt['—'] ? `<span class="dim">無檢查 ${cnt['—']}</span>` : ''}</div>
+  <p class="note" style="margin:0">依 Tokyo MOU 平均留置指數 <b>${avg.det}%</b>、平均缺失指數 <b>${avg.def}</b>（${esc(avg.valid)}）判定，算法與 Tokyo MOU 公司績效相同，套用在單船。可在「系統管理 → Tokyo MOU 年度指數與名單」更新。</p></div><div class="vgrid">` +
+    (list.length ? list.map(({ k, o, V }) => { const m = PERF_META[o.p.performance]; return `<button type="button" class="vcard${m ? ' risk-' + m.c : ''}" data-vc="${esc(k)}"><span class="nm">${esc(V.name)}${o.det ? ` <span class="pill det">留置 ${o.det}</span>` : ''}${o.open ? ` <span class="stp stp-open">進行中 ${o.open}</span>` : ''}</span><span class="zh">${esc(V.zh)}${V.former.length ? ` · 前 ${esc(V.former.join('、'))}` : ''}${V.cur ? ` · ${esc(V.cur.company)}` : ''}</span><span class="st"><span><b class="num">${o.n}</b> 次檢查</span><span><b class="num">${o.d}</b> 項缺失</span><span>NIL ${pct(o.nil, o.n)}</span></span><span class="st rkline">${m ? `<span class="rk rk-${m.c}">${m.t}</span><span>缺失比 <b class="num">${fix2(o.p.def_ratio)}</b></span><span>留置率 <b class="num">${o.p.det_rate.toFixed(1)}%</b></span>` : (S.perfBasis === '36m' ? '<span class="dim">近 36 個月無 Tokyo MOU 檢查</span>' : '<span class="dim">無檢查</span>')}</span><span class="st dim">最近 ${dfmt(o.last)}</span></button>`; }).join('') : '<div class="empty">沒有符合條件的船舶</div>') + '</div>';
   v.innerHTML = html;
   v.querySelectorAll('.vcard').forEach(b => b.addEventListener('click', () => openVessel(b.dataset.vc)));
+  $('#pf-basis').addEventListener('change', e => { S.perfBasis = e.target.value; render(); });
+  $('#pf-sort').addEventListener('change', e => { S.vSort = e.target.value; render(); });
   const cl = v.querySelector('[data-close]'); if (cl) cl.addEventListener('click', () => { S.profile = null; render(); });
   wireLinks(v);
 }
@@ -416,7 +457,7 @@ function profileHTML(k, c) {
   const rep = {}; defs.forEach(d => { if (d.code) (rep[d.code] || (rep[d.code] = new Set())).add(d.date); });
   const repl = Object.entries(rep).filter(([, s]) => s.size > 1);
   const facts = [['IMO', V.imo || '—'], ['船型系列', cur.series || '—'], ['船旗', cur.flag || '—'], ['事故編號公司碼', cur.company || '—'], ['管理公司', cur.manager || cur.management || '—'], ['DOC 公司 IMO', cur.doc_company_imo || '—'], ['負責人 PIC', cur.pic || '—'],
-    ['建造日期', cur.date_of_build ? dfmt(cur.date_of_build) : '—'], ['造船廠', cur.builder || '—'], ['船級 / 船級號', [cur.class_society, cur.class_number].filter(Boolean).join(' ') || '—'], ['GT / DWT', [cur.gross_tonnage, cur.deadweight].filter(Boolean).map(fmt).join(' / ') || '—'], ['TEU', cur.teu ? fmt(cur.teu) : '—'], ['登記船東', cur.registered_owner || '—'], ['船籍港', cur.port_of_registry || '—'], ['ISM 公司', cur.ism_company || '—'], ['NK 資料日期', cur.nk_data_date ? dfmt(cur.nk_data_date) : '未匯入']];
+    ['建造日期', cur.date_of_build ? dfmt(cur.date_of_build) : '—'], ['造船廠', cur.builder || '—'], ['船級 / 船級號', [cur.class_society, cur.class_number].filter(Boolean).join(' ') || '—'], ['GT / DWT', [cur.gross_tonnage, cur.deadweight].filter(Boolean).map(fmt).join(' / ') || '—'], ['TEU', cur.teu ? fmt(cur.teu) : '—'], ['登記船東', cur.registered_owner || '—'], ['船籍港', cur.port_of_registry || '—'], ['ISM 公司', cur.ism_company || '—'], ['船旗績效（Tokyo MOU）', LIST_PERF[PSC.flagPerf(cur.flag, M.settings)] || '—'], ['船級 RO 績效（Tokyo MOU）', LIST_PERF[PSC.roPerf(cur.class_society, M.settings)] || '—'], ['NK 資料日期', cur.nk_data_date ? dfmt(cur.nk_data_date) : '未匯入']];
   const W = windowRows().find(r => String(r.imo) === String(V.imo));
   return `<div class="card"><div class="vprof-head"><div><div class="eyebrow">船舶檔案</div><h2 style="font-size:20px;margin-top:2px">${esc(V.name)} <span class="dim" style="font-weight:400;font-size:15px">${esc(V.zh)}</span></h2>${V.former.length ? `<div class="note" style="margin-top:2px">曾用名 ${esc(V.former.join('、'))}；紀錄保留檢查當時的船名</div>` : ''}</div><button class="btn" type="button" data-close>關閉</button></div>
   <dl class="facts">${facts.map(([a, x]) => `<div><dt>${a}</dt><dd>${esc(x)}</dd></div>`).join('')}</dl>
@@ -981,8 +1022,12 @@ function vAdmin(v) {
   <div class="field"><label>Drive 歸檔根資料夾 ID</label><input class="inp mono" value="${esc(set.drive_root_folder_id || '（第一次上傳時自動建立）')}" readonly></div>
   <div class="field"><label for="s-br">可看 Bribe 的角色</label><input class="inp" id="s-br" value="${esc(set.bribe_roles || 'admin,editor')}"><span class="hint">以逗號分隔，例如 admin,editor</span></div>
   <div class="frow"><div class="field"><label for="s-ad">窗口提醒天數</label><input class="inp" type="number" min="1" id="s-ad" value="${esc(set.window_alert_days || 30)}"></div><div class="field"><label for="s-mail">每日提醒收件人</label><input class="inp" id="s-mail" value="${esc(set.alert_emails || '')}" placeholder="a@tslines.com, b@tslines.com"></div></div>
-  <div class="field"><label for="s-white">Tokyo MOU 白名單船旗（估算 SRP）</label><input class="inp" id="s-white" value="${esc(set.tmou_white_flags || '')}"></div>
   <div class="btnrow"><button class="btn primary" type="button" id="s-save">儲存設定</button></div><p class="note" style="margin:0">變更門檻只影響之後新登錄的案件；已發出的編號不會變更。</p></div></div></div>
+  <div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>Tokyo MOU 年度指數與名單</h2><p class="sub" style="margin:2px 0 0">船舶檔案的風險色標、管理公司績效與 PSC 窗口的估算 SRP 都用這裡的值。Tokyo MOU 每年 7 月 1 日更新：平均指數見 NIR 頁「Detention and Deficiency Indices」，船旗與 RO 名單見年報 Flag / RO performance list，高績效公司名單每季公布。名單以分號或換行分隔。</p></div><div class="btnrow"><button class="btn" type="button" id="tm-fill">填入 2026–27 公告值</button></div></div>
+  <div class="form"><div class="frow"><div class="field"><label for="tm-valid">適用期間</label><input class="inp" id="tm-valid" data-tm="tmou_index_valid" value="${esc(set.tmou_index_valid || '')}"></div><div class="field"><label for="tm-det">平均留置指數（%）</label><input class="inp" id="tm-det" data-tm="tmou_avg_detention_index" value="${esc(set.tmou_avg_detention_index || '')}"></div><div class="field"><label for="tm-def">平均缺失指數</label><input class="inp" id="tm-def" data-tm="tmou_avg_deficiency_index" value="${esc(set.tmou_avg_deficiency_index || '')}"></div><div class="field"><label for="tm-hpp">高績效公司名單季度</label><input class="inp" id="tm-hpp" data-tm="tmou_high_perf_period" value="${esc(set.tmou_high_perf_period || '')}"></div></div>
+  <div class="frow">${[['tmou_white_flags', '船旗 High 名單（LRS 條件）'], ['tmou_black_flags', '船旗 Low 名單（HRS +1）'], ['tmou_ro_high', 'RO High 名單（LRS 條件）'], ['tmou_ro_low', 'RO Low 名單（HRS +1）']].map(([k, l]) => `<div class="field"><label for="tm-${k}">${l}</label><textarea class="inp" rows="3" id="tm-${k}" data-tm="${k}">${esc(set[k] || '')}</textarea></div>`).join('')}</div>
+  <div class="field"><label for="tm-docs">高績效公司名單（ISM DOC 公司 IMO）</label><textarea class="inp mono" rows="2" id="tm-docs" data-tm="tmou_high_perf_docs">${esc(set.tmou_high_perf_docs || '')}</textarea><span class="hint">從「List of high performing companies」PDF 複製公司 IMO 即可，系統只看 7 位數字</span></div>
+  <div class="btnrow"><button class="btn primary" type="button" id="tm-save">儲存</button></div></div></div>
   <div class="grid g2" style="margin-bottom:16px"><div class="card"><div class="section-head"><h2>資料檢核</h2><button class="btn" type="button" id="dc-run">執行檢核</button></div><p class="sub">組員直接編輯 Google 試算表後，用這裡檢查編號重複、找不到對應、格式錯誤等問題。試算表選單「TSL PSC → 檢核資料」結果相同。</p><div id="dc-out"></div></div>
   <div class="card"><h2>匯入船舶主檔 / NK 資料</h2><p class="sub">選擇船隊監控系統的 <span class="mono">fleet-data.js</span>（整個船隊一次匯入），或貼上 SHIP JSON。依 IMO 對應，更新船級、GT / DWT、TEU、登記船東等欄位與 NK 檢驗 / 證書到期。</p><div class="form"><input class="inp" type="file" id="nk-file" accept=".js,.json,application/json,text/javascript"><textarea class="inp mono" id="nk-text" rows="3" placeholder='{"vessel_master": {"imo_number": "9967512", ...}, "certificates": [...], "surveys": [...]}'></textarea><div class="field"><label for="nk-mode">寫入方式</label><select id="nk-mode"><option value="class">船級欄位以 Class 資料為準，其餘只補空白（建議）</option><option value="fill">只補空白欄位，不同值列出來確認</option><option value="overwrite">全部以主檔覆蓋</option></select></div><div class="btnrow"><button class="btn primary" type="button" id="nk-go">匯入</button><span class="dim" id="nk-info" style="font-size:12.5px"></span></div></div>
   <h2 style="margin-top:14px">管理公司（Tokyo MOU 績效）</h2><div class="tbl-wrap"><table><thead><tr><th>公司碼</th><th>名稱</th><th>DOC 公司 IMO</th><th>績效</th><th>日期</th><th>備註</th></tr></thead><tbody>${M.companies.map(c => `<tr><td class="mono">${esc(c.code)}</td><td>${esc(c.name)}</td><td class="mono">${esc(c.doc_imo)}</td><td>${esc(c.tmou_performance)}</td><td class="num">${dfmt(c.perf_as_of)}</td><td class="dim" style="font-size:12px">${esc(c.note)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚未匯入</td></tr>'}</tbody></table></div></div></div>
@@ -1019,11 +1064,19 @@ function vAdmin(v) {
     $('#u-cancel').addEventListener('click', () => { S.adm.user = null; render(); });
     $('#u-save').addEventListener('click', () => { const row = { email: $('#u-email').value.trim().toLowerCase(), name: $('#u-name').value, role: $('#u-role').value, active: $('#u-active').value }; if (!/@/.test(row.email)) { toast('請輸入正確的 Email'); return; } run(async () => { await api('saveUser', row); S.adm.user = null; await reload(); toast('已儲存 ' + row.email); }, $('#u-save')); });
   }
+  $('#tm-fill').addEventListener('click', () => { v.querySelectorAll('[data-tm]').forEach(el => { const d = PSC.DEFAULT_SETTINGS.find(x => x.key === el.dataset.tm); if (d) el.value = d.value; }); toast('已填入 2026-07-01 ~ 2027-06-30 公告值，按「儲存」生效'); });
+  $('#tm-save').addEventListener('click', () => run(async () => {
+    const rows = [...v.querySelectorAll('[data-tm]')].map(el => { const d = PSC.DEFAULT_SETTINGS.find(x => x.key === el.dataset.tm); return { key: el.dataset.tm, value: el.value.trim(), note: d ? d.note : '' }; });
+    const bad = rows.filter(r => /index$/.test(r.key) && !isFinite(Number(r.value.replace('%', ''))));
+    if (bad.length) { toast('平均指數請填數字'); return; }
+    const docs = rows.find(r => r.key === 'tmou_high_perf_docs'); docs.value = [...new Set(docs.value.match(/\b\d{7}\b/g) || [])].join(',');
+    await api('saveSettings', { rows }); await reload(); toast('已更新 Tokyo MOU 指數與名單');
+  }, $('#tm-save')));
   $('#s-save').addEventListener('click', () => run(async () => {
     await api('saveSetting', { key: 'tier2_def_threshold', value: $('#s-th').value, note: '未留置但缺失項數達此數量即升為 Tier 2' });
     await api('saveSetting', { key: 'tier2_on_ism', value: $('#s-ism').value, note: '開出 ISM 缺失（代碼 15xxx）即升為 Tier 2' });
     await api('saveSetting', { key: 'google_client_id', value: $('#s-cid').value.trim(), note: 'Google 登入用 OAuth Client ID（與前端 config.js 相同）' });
-    for (const [k, id] of [['bribe_roles', '#s-br'], ['window_alert_days', '#s-ad'], ['alert_emails', '#s-mail'], ['tmou_white_flags', '#s-white']]) {
+    for (const [k, id] of [['bribe_roles', '#s-br'], ['window_alert_days', '#s-ad'], ['alert_emails', '#s-mail']]) {
       const d = PSC.DEFAULT_SETTINGS.find(x => x.key === k); await api('saveSetting', { key: k, value: $(id).value.trim(), note: d ? d.note : '' });
     }
     await reload(); toast('設定已儲存');
