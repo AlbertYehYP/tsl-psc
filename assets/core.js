@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.3.0';
+  var VERSION = '1.5.0';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -272,11 +272,11 @@ var PSC = (function () {
       'status', 'pic', 'summary', 'closed_date', 'source', 'insp_id', 'check_notes', 'flash_due', 'initial_due', 'rca_due',
       'corrective_action', 'created_by', 'created_at', 'updated_by', 'updated_at',
       'location', 'major_level', 'loss_usd', 'deaths', 'injuries', 'delay_h', 'ert', 'ert_chair', 'force_majeure', 'fm_note',
-      'flash_at', 'initial_at', 'progress_at', 'rca_at', 'due_note', 'close_checks', 'former_no', 'rule_set'],
+      'flash_at', 'initial_at', 'progress_at', 'rca_at', 'due_note', 'close_checks', 'former_no', 'rule_set', 'reply_log'],
     Vessels: ['vessel', 'imo', 'chinese', 'company', 'management', 'manager', 'pic', 'pic_email', 'valid_from', 'valid_to',
       'series', 'flag', 'note', 'doc_company_imo', 'class_society', 'class_number', 'flag_code', 'port_of_registry', 'ship_type',
       'ism_company', 'registered_owner', 'date_of_build', 'gross_tonnage', 'deadweight', 'teu', 'builder', 'nk_data_date'],
-    Companies: ['code', 'name', 'doc_imo', 'tmou_performance', 'perf_as_of', 'note'],
+    Companies: ['code', 'name', 'doc_imo', 'tmou_performance', 'perf_as_of', 'note', 'greeting', 'email_to', 'email_cc'],
     RiskProfiles: ['imo', 'vessel', 'srp', 'company_performance', 'as_of', 'source', 'note'],
     MOUMap: ['country', 'port', 'mou', 'also', 'note'],
     Rules: ['rule_set', 'valid_from', 'kind', 'code', 'name', 'name_en', 'flash_h', 'initial_h', 'progress_d', 'rca_d',
@@ -285,8 +285,79 @@ var PSC = (function () {
     NKStatus: ['imo', 'kind', 'code', 'label', 'next', 'due', 'from', 'to', 'alt_from', 'alt_to', 'expiry', 'last', 'source_date'],
     Users: ['email', 'name', 'role', 'active'],
     Settings: ['key', 'value', 'note'],
+    Templates: ['code', 'stage', 'name', 'subject', 'body', 'sort', 'active', 'note'],
     AuditLog: ['ts', 'user', 'action', 'ref', 'detail']
   };
+  /* ---------------- 回信範本（管理公司各階段通報後的回覆信） ---------------- */
+  /** 預設範本；試算表「Templates」分頁同 code 的列會覆蓋，新 code 會新增，active = N 隱藏 */
+  var DEFAULT_TEMPLATES = [ { "code": "ack", "stage": "flash", "sort": "10", "name": "收到立即通報：立案與編號通知", "subject": "[{{tracking_no}}] M/V {{vessel}} - Incident Acknowledgement & Tracking Number", "body": "Dear {{greeting}},\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nINCIDENT ACKNOWLEDGEMENT & TRACKING NUMBER\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nIncident Number: {{tracking_no}}\nVessel: M/V {{vessel}}\nIncident: {{incident}}\nDate / Location: {{date}}{{location_sep}}{{location}}\nClassification: {{tier_en}} / {{type_en}}\nStatus: OPEN / REGISTERED\nTSL PIC: {{pic}}\n\nGood day.\n\nTSL Marine Technical Department acknowledges receipt of the Flash Report{{flash_at_txt}} from {{company}} and the Master regarding the above incident.\n\nThis incident has been registered under the Incident Number above. Please quote this number in the subject line of all subsequent reports and correspondence.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nREPORTING REQUIREMENTS (3-TSTB-VSL-P002)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nInitial Report: within {{initial_h}} hours of the incident (due {{initial_due}})\nProgress Updates: {{progress_txt}}\nRoot Cause Analysis (RCA): within {{rca_d}} days of the incident (due {{rca_due}})\nWhere the Ship Management Agreement specifies shorter time limits, the Agreement shall prevail.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nIMMEDIATE ACTIONS REQUESTED\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n【請填寫：要求船方立即執行的事項，例如確認人員安全、穩定船況、保全證據（VDR、航海日誌、照片）、通知船級／P&I】\n\nPlease contact the undersigned at any time should Owner's support be required.\n\nBest regards,\n\n{{pic}}\nMarine Technical Department (MARTEC)\nT.S. Lines Ltd.", "note": "6.4.3：確認收到通報後產生追蹤編號並回覆通報人", "active": "Y" }, { "code": "initial", "stage": "initial", "sort": "20", "name": "收到初步報告：狀態更新與督導", "subject": "[{{tracking_no}}] M/V {{vessel}} - Incident Status Update & Oversight", "body": "Dear {{greeting}},\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nINCIDENT STATUS UPDATE & OVERSIGHT\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nIncident Number: {{tracking_no}}\nVessel: M/V {{vessel}}\nIncident: {{incident}}\nDate / Location: {{date}}{{location_sep}}{{location}}\nClassification: {{tier_en}} / {{type_en}}\nStatus: OPEN / UNDER ACTIVE MONITORING\nTSL PIC: {{pic}}\n\nGood day.\n\nTSL Marine Technical Department has reviewed the Initial Report and the chronological updates provided by {{company}} and the Master regarding the {{incident}} on {{date}}.\n\n【請填寫：人員、船舶、貨物與環境的現況，例如 all crew members are safe; the vessel resumed her voyage at 1918 LT】\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTSL SUMMARY OF EXECUTION (Based on {{company}} Reports)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nAccording to your reports, TSL has logged the following operational timeline for our management archives:\n\n【請填寫：依管理公司報告整理的處置時間軸，每段一個重點（初期控制、處置、結果）】\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTSL MANDATORY DIRECTIVES & NEXT PORT PREPARATION\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{{company}} must strictly supervise and execute the following Owner's directives:\n\n【請填寫：船東指示事項；如有相關技術通告，請註明通告編號（TSL-MARTEC-字別-年度-序號）】\n\nEvidence Preservation: The Master must compile and preserve all objective evidence (Statement of Facts, time sheets, photographs/videos, log extracts) as required by TSL Legal and Insurance teams.\n\nNext Reports: progress update {{progress_txt_short}}; RCA due {{rca_due}}.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPERFORMANCE EVALUATION (TSL Feedback)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nOnboard Response & Leadership: 【EXCELLENT / GOOD / SATISFACTORY / NEEDS IMPROVEMENT】\n\nShore Support & Communication: 【EXCELLENT / GOOD / SATISFACTORY / NEEDS IMPROVEMENT】\n\nOversight Statement:\nTSL Marine Technical Department officially records this incident as OPEN under active monitoring.\n\nBest regards,\n\n{{pic}}\nMarine Technical Department (MARTEC)\nT.S. Lines Ltd.", "note": "範本格式取自 VSHIPS-TS SHANGHAI-20260712-1F-01 回信", "active": "Y" }, { "code": "progress", "stage": "progress", "sort": "30", "name": "收到進度更新：追蹤與待辦", "subject": "[{{tracking_no}}] M/V {{vessel}} - Progress Follow-up", "body": "Dear {{greeting}},\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nINCIDENT PROGRESS FOLLOW-UP\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nIncident Number: {{tracking_no}}\nVessel: M/V {{vessel}}\nIncident: {{incident}}\nDate / Location: {{date}}{{location_sep}}{{location}}\nClassification: {{tier_en}} / {{type_en}}\nStatus: OPEN / UNDER ACTIVE MONITORING\nTSL PIC: {{pic}}\n\nGood day.\n\nTSL Marine Technical Department acknowledges the progress update{{progress_at_txt}} from {{company}} regarding the above incident.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSTATUS NOTED\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n【請填寫：本次進度更新的重點】\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nOUTSTANDING ITEMS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n【請填寫：仍待管理公司提供或完成的事項，例如 surveyor report, class attendance, repair plan】\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nNEXT DEADLINES\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nNext Progress Update: {{progress_txt_short}}\nRoot Cause Analysis (RCA): due {{rca_due}}\n\nTSL Marine Technical Department continues to monitor this incident.\n\nBest regards,\n\n{{pic}}\nMarine Technical Department (MARTEC)\nT.S. Lines Ltd.", "note": "6.4.2.3：重大事件每 7 天至少更新一次", "active": "Y" }, { "code": "rca", "stage": "rca", "sort": "40", "name": "收到 RCA：審查意見與結案條件", "subject": "[{{tracking_no}}] M/V {{vessel}} - RCA Review", "body": "Dear {{greeting}},\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nROOT CAUSE ANALYSIS (RCA) REVIEW\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nIncident Number: {{tracking_no}}\nVessel: M/V {{vessel}}\nIncident: {{incident}}\nDate / Location: {{date}}{{location_sep}}{{location}}\nClassification: {{tier_en}} / {{type_en}}\nStatus: OPEN / RCA UNDER REVIEW\nTSL PIC: {{pic}}\n\nGood day.\n\nTSL Marine Technical Department acknowledges receipt of the Root Cause Analysis{{rca_at_txt}} and has completed the review below.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nTSL REVIEW COMMENTS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nRoot Cause Identification: 【ACCEPTED / REVISION REQUIRED】\n【請填寫：對根本原因分析的意見】\n\nCorrective & Preventive Actions (CAPA): 【ACCEPTED / REVISION REQUIRED】\n{{corrective_action}}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPREREQUISITES FOR CLOSURE (P002 6.6.4)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n1. All investigation procedures completed\n2. Reporting time limits under the Agreement and P002 complied with\n3. Compliance with the ISM Code confirmed\n4. All related documents filed\n\n【請填寫：結案前仍需補交的文件或說明；若無，請寫 No further documents are required.】\n\nBest regards,\n\n{{pic}}\nMarine Technical Department (MARTEC)\nT.S. Lines Ltd.", "note": "6.6：RCA 審查；6.6.4 結案四項確認", "active": "Y" }, { "code": "close", "stage": "close", "sort": "50", "name": "結案通知", "subject": "[{{tracking_no}}] M/V {{vessel}} - Incident Closure Notice", "body": "Dear {{greeting}},\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nINCIDENT CLOSURE NOTICE\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nIncident Number: {{tracking_no}}\nVessel: M/V {{vessel}}\nIncident: {{incident}}\nDate / Location: {{date}}{{location_sep}}{{location}}\nClassification: {{tier_en}} / {{type_en}}\nStatus: CLOSED\nTSL PIC: {{pic}}\n\nGood day.\n\nFollowing review of the Root Cause Analysis and the Corrective & Preventive Actions submitted by {{company}}, TSL Marine Technical Department hereby formally closes this incident{{closed_date_txt}}.\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCLOSURE CONFIRMATION (P002 6.6.4)\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{{close_checks_txt}}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nCORRECTIVE & PREVENTIVE ACTIONS\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n{{corrective_action}}\n\n【請填寫：需要船隊分享的經驗教訓（Lessons Learned），或請管理公司在其他船舶落實的事項】\n\nAll incident records will be retained for {{retention_years}} years in accordance with P002 6.7. We thank {{company}} and the Master for their cooperation.\n\nBest regards,\n\n{{pic}}\nMarine Technical Department (MARTEC)\nT.S. Lines Ltd.", "note": "6.6.4：以正式信文通知結案", "active": "Y" }, { "code": "reminder", "stage": "overdue", "sort": "60", "name": "逾期催報", "subject": "[{{tracking_no}}] M/V {{vessel}} - Overdue Report Reminder", "body": "Dear {{greeting}},\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nOVERDUE REPORT REMINDER\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nIncident Number: {{tracking_no}}\nVessel: M/V {{vessel}}\nIncident: {{incident}}\nDate / Location: {{date}}{{location_sep}}{{location}}\nClassification: {{tier_en}} / {{type_en}}\nStatus: OPEN / REPORT OVERDUE\nTSL PIC: {{pic}}\n\nGood day.\n\nAccording to TSL records, the following report(s) for the above incident have not been received within the time limits of 3-TSTB-VSL-P002:\n\n{{overdue_txt}}\n\nPlease submit the outstanding report(s) within 【24 hours】, or advise the reason for the delay. Where communication was interrupted by force majeure, please state the reason and the actual time of the incident (P002 6.4.2.5).\n\nPlease note that reporting timeliness is included in the annual evaluation of the management company (P002 6.5).\n\nBest regards,\n\n{{pic}}\nMarine Technical Department (MARTEC)\nT.S. Lines Ltd.", "note": "6.5：時限達成率納入年度評比", "active": "Y" } ];
+  var MON_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function enDate(d) { d = isoDate(d); if (!d) return ''; var p = d.split('-'); return p[2] + '-' + MON_EN[+p[1] - 1] + '-' + p[0]; }
+  var CO_TEAM = { FLEET: 'FML Management Team', VSHIPS: 'V.Ships Management Team', BSM: 'BSM Management Team', TSL: 'T.S. Lines Fleet Management Team', TEH: 'Teh Shipping Management Team' };
+  var CO_EN = { FLEET: 'FML', VSHIPS: 'V.Ships', BSM: 'BSM', TSL: 'T.S. Lines', TEH: 'Teh Shipping' };
+  var STAGE_EN = { flash: 'Flash Report', initial: 'Initial Report', rca: 'Root Cause Analysis (RCA)' };
+  var CLOSE_EN = ['All investigation procedures completed', 'Reporting time limits complied with', 'Compliance with the ISM Code confirmed', 'All related documents filed'];
+  function templatesOf(rows) {
+    var by = {}, order = [];
+    DEFAULT_TEMPLATES.forEach(function (t) { by[t.code] = Object.assign({ builtin: 'Y' }, t); order.push(t.code); });
+    (rows || []).forEach(function (r) { var c = s(r.code); if (!c) return; var t = by[c] ? Object.assign({}, by[c]) : (order.push(c), { builtin: 'N', subject: '', body: '', name: c, active: 'Y' }); Object.keys(r).forEach(function (k) { if (s(r[k]) !== '') t[k] = r[k]; }); by[c] = t; });
+    return order.map(function (c) { return by[c]; }).sort(function (a, b) { return (Number(a.sort) || 99) - (Number(b.sort) || 99); });
+  }
+  /** 依事故目前進度建議用哪一個範本 */
+  function replyStage(inc, docs, today) {
+    if (s(inc.status) === STATUS.CLOSED) return 'close';
+    var tl = reportTimeliness(inc, docs, today), at = {};
+    tl.forEach(function (x) { at[x.stage] = x.at; });
+    if (tl.some(function (x) { return x.state === 'overdue'; })) return 'reminder';
+    if (at.rca) return 'rca';
+    if (isoDate(inc.progress_at)) return 'progress';
+    if (at.initial) return 'initial';
+    return 'ack';
+  }
+  /** 範本變數；o = { rules, company, docs, today, master, pic, incident_en, team } */
+  function replyVars(inc, o) {
+    o = o || {};
+    var R = rulesAt(o.rules, inc.date), tier = R.tiers[s(inc.tier)] || {}, m = R.major[s(inc.major_level)], co = o.company || {}, code = s(inc.company);
+    var today = isoDate(o.today) || isoDate(new Date());
+    var pd = m ? numOr(R.params.progress_major_d, 7) : numOr(tier.progress_d, 0);
+    var lastUpd = [isoDate(inc.progress_at)].concat((o.docs || []).filter(function (d) { return d.doc_type === 'UPD'; }).map(function (d) { return isoDate(d.uploaded_at); })).filter(Boolean).sort().pop() || isoDate(inc.date) || today;
+    var tl = reportTimeliness(inc, o.docs, today), over = tl.filter(function (x) { return x.state === 'overdue'; }).map(function (x) { return '- ' + STAGE_EN[x.stage] + ': due ' + enDate(x.due); });
+    if (s(inc.status) === STATUS.OPEN && pd && daysBetween(lastUpd, today) > pd) over.push('- Progress Update: required at least every ' + pd + ' days (last update ' + enDate(lastUpd) + ')');
+    var team = s(o.team) || s(co.greeting) || CO_TEAM[code] || ((CO_EN[code] || code) + ' Management Team');
+    var cc = s(inc.close_checks);
+    return {
+      greeting: (s(o.master) ? 'Capt. ' + s(o.master) : 'Master') + ' and ' + team,
+      tracking_no: s(inc.tracking_no), vessel: up(inc.vessel), incident: s(o.incident_en) || ('【請填寫事故英文名稱；中文簡述：' + s(inc.summary) + '】'), date: enDate(inc.date),
+      location: s(inc.location), location_sep: s(inc.location) ? ', ' : '',
+      tier_en: s(tier.name_en) || ('Tier ' + s(inc.tier)), type_en: s((R.types[s(inc.type)] || {}).name_en) || s(inc.type),
+      company: CO_EN[code] || s(co.name) || code, pic: s(o.pic) || s(inc.pic),
+      initial_h: s(tier.initial_h), rca_d: s(tier.rca_d), initial_due: enDate(inc.initial_due), rca_due: enDate(inc.rca_due),
+      progress_txt: pd ? 'at least every ' + pd + ' days until closure' : 'as requested by TSL',
+      progress_txt_short: pd ? 'within ' + pd + ' days (by ' + enDate(addDays(lastUpd, pd)) + ')' : 'as requested by TSL',
+      flash_at_txt: isoDate(inc.flash_at) ? ' received on ' + enDate(inc.flash_at) : '',
+      progress_at_txt: isoDate(inc.progress_at) ? ' of ' + enDate(inc.progress_at) : '',
+      rca_at_txt: isoDate(inc.rca_at) ? ' dated ' + enDate(inc.rca_at) : '',
+      closed_date_txt: ' effective ' + enDate(inc.closed_date || today),
+      corrective_action: s(inc.corrective_action) || '【請填寫：矯正與預防措施】',
+      close_checks_txt: CLOSE_EN.map(function (t, i) { return (cc.charAt(i) === 'Y' ? '[x] ' : '[ ] ') + t; }).join('\n'),
+      overdue_txt: over.length ? over.join('\n') : '【目前沒有逾期項目，請確認是否改用其他範本】',
+      retention_years: s(R.params.retention_years) || '5'
+    };
+  }
+  function fillTemplate(text, vars) { return s(text).replace(/\{\{(\w+)\}\}/g, function (all, k) { return vars && vars[k] !== undefined && vars[k] !== null ? String(vars[k]) : all; }); }
+  /** 還沒填的地方：【…】提示與沒有對應的 {{變數}} */
+  function pendingMarks(text) { return (s(text).match(/【[^】]*】|\{\{\w+\}\}/g) || []); }
+  function logReply(store, user, p) {
+    need(user, 'editor');
+    var no = s(p.tracking_no), inc = store.all('Incidents').filter(function (x) { return s(x.tracking_no) === no; })[0];
+    if (!inc) throw new Error('找不到事故 ' + no);
+    var t = new Date(store.now()), stamp = isNaN(t) ? s(store.now()) : t.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+    var line = stamp + '｜' + s(p.code) + (s(p.name) ? ' ' + s(p.name) : '') + '｜' + user.email;
+    store.updateWhere('Incidents', function (x) { return s(x.tracking_no) === no; }, { reply_log: s(inc.reply_log) ? s(inc.reply_log) + '\n' + line : line });
+    audit(store, user, 'reply', no, s(p.code) + (s(p.subject) ? '：' + s(p.subject) : ''));
+    return { line: line };
+  }
+
   var DEFAULT_SETTINGS = [
     { key: 'tier2_def_threshold', value: '6', note: '未留置但缺失項數達此數量即升為 Tier 2' },
     { key: 'tier2_on_ism', value: 'Y', note: '開出 ISM 缺失（代碼 15xxx）即升為 Tier 2' },
@@ -299,6 +370,8 @@ var PSC = (function () {
     { key: 'tmou_black_flags', value: 'Gambia; Saint Kitts and Nevis; Cameroon; Togo; Tanzania; Sao Tome and Principe; Palau; Iran; Cook Islands; Sierra Leone; Comoros; Mongolia; Sint Maarten; Djibouti; Belize', note: 'Tokyo MOU 船旗績效 Low 名單（2026-07-01 ~ 2027-06-30；估算 SRP 用；以分號分隔）' },
     { key: 'tmou_ro_high', value: 'Biro Klasifikasi Indonesia; Indian Register of Shipping; Overseas Marine Certification Services; Panama Maritime Documentation Services; Intermaritime Certification Services, S.A.; Russian Maritime Register of Shipping; Isthmus Bureau of Shipping; Vietnam Register; CR Classification Society; RINA Services S.p.A.; Nippon Kaiji Kyokai; Bureau Veritas; Lloyd\'s Register; DNV AS; Korean Register; China Classification Society; American Bureau of Shipping', note: 'Tokyo MOU RO 績效 High（2026-07-01 ~ 2027-06-30；以分號分隔；船級簡稱 NK、LR、DNV、CR 等會自動對應）' },
     { key: 'tmou_ro_low', value: 'Cosmos Marine Bureau; Union Bureau of Shipping; Asia Shipping Certification Services', note: 'Tokyo MOU RO 績效 Low（2026-07-01 ~ 2027-06-30）' },
+    { key: 'inc_risk_weights', value: 'tier1=10; tier2=4; tier3=1; major=5; psc=0.5', note: '事故風險計分：每件事故依通報分級計分（tier1 / tier2 / tier3），屬 4.1 重大事件再加 major；由 PSC 檢查產生的事故乘以 psc 係數；作廢不計' },
+    { key: 'inc_risk_levels', value: '15; 8; 3', note: '事故風險分級門檻（近 12 個月或單一年度分數）：≥ 第 1 個值為高風險、≥ 第 2 個為偏高、≥ 第 3 個為一般，其餘為低風險' },
     { key: 'tmou_avg_detention_index', value: '3.84', note: 'Tokyo MOU 平均留置指數（%），公司績效與船舶風險色標用；2027-06-30 前有效，每年 7 月依 NIR 頁更新' },
     { key: 'tmou_avg_deficiency_index', value: '2.64', note: 'Tokyo MOU 平均缺失指數，公司績效與船舶風險色標用；2027-06-30 前有效' },
     { key: 'tmou_index_valid', value: '2026-07-01 ~ 2027-06-30', note: '上面兩個平均指數與船旗 / RO 名單的適用期間（顯示用）' },
@@ -849,6 +922,83 @@ var PSC = (function () {
     out.days_to_open = daysBetween(t, out.from); out.days_to_close = daysBetween(t, out.to);
     return out;
   }
+  /* ---------------- 事故風險（依每年事故嚴重性）與趨勢 ---------------- */
+  function kvList(v) { var o = {}; nameList(v).forEach(function (x) { var p = x.split('='); if (p.length === 2 && s(p[0])) o[s(p[0]).toLowerCase()] = parseFloat(p[1]); }); return o; }
+  function incRiskCfg(set) {
+    set = set || {}; var d = function (k) { return DEFAULT_SETTINGS.filter(function (x) { return x.key === k; })[0].value; };
+    var w = Object.assign(kvList(d('inc_risk_weights')), kvList(set.inc_risk_weights));
+    var lv = nameList(s(set.inc_risk_levels) || d('inc_risk_levels')).map(Number).filter(function (n) { return !isNaN(n); });
+    if (lv.length < 3) lv = nameList(d('inc_risk_levels')).map(Number);
+    return { w: w, levels: lv };
+  }
+  /** 單件事故分數 */
+  function incidentScore(x, cfg) {
+    cfg = cfg || incRiskCfg();
+    if (s(x.status) === STATUS.VOID) return 0;
+    var w = cfg.w, v = numOr(w['tier' + s(x.tier)], 0);
+    if (s(x.major_level)) v += numOr(w.major, 0);
+    if (s(x.source) === 'PSC' || s(x.insp_id) || x.psc === true) v *= numOr(w.psc, 1);
+    return Math.round(v * 100) / 100;
+  }
+  /** 分數 → 等級：H 高風險、E 偏高、M 一般、L 低風險 */
+  function incRiskLevel(score, cfg) { var l = (cfg || incRiskCfg()).levels; return score >= l[0] ? 'H' : score >= l[1] ? 'E' : score >= l[2] ? 'M' : 'L'; }
+  /** 一艘船（或一組事故）的年度嚴重性與近 12 個月風險 */
+  function incidentRisk(incs, cfg, today) {
+    cfg = cfg || incRiskCfg(); var t = isoDate(today) || isoDate(new Date()), from = addMonths(t, -12), years = {}, last12 = 0, n12 = 0;
+    (incs || []).forEach(function (x) {
+      if (s(x.status) === STATUS.VOID) return;
+      var d = isoDate(x.date); if (!d) return;
+      var sc = incidentScore(x, cfg), y = d.slice(0, 4), o = years[y] || (years[y] = { score: 0, n: 0, t1: 0, t2: 0, t3: 0, major: 0 });
+      o.score += sc; o.n++; if (o['t' + s(x.tier)] !== undefined) o['t' + s(x.tier)]++; if (s(x.major_level)) o.major++;
+      if (d > from && d <= t) { last12 += sc; n12++; }
+    });
+    Object.keys(years).forEach(function (y) { years[y].score = Math.round(years[y].score * 100) / 100; years[y].level = incRiskLevel(years[y].score, cfg); });
+    last12 = Math.round(last12 * 100) / 100;
+    return { years: years, last12: last12, n12: n12, level: incRiskLevel(last12, cfg) };
+  }
+  /** 加權線性迴歸（x 為年）；回傳斜率（每年）與截距 */
+  function linFit(pts) {
+    var sw = 0, sx = 0, sy = 0; (pts || []).forEach(function (p) { var w = p.w || 1; sw += w; sx += w * p.x; sy += w * p.y; });
+    if (!sw) return { slope: 0, intercept: 0 };
+    var mx = sx / sw, my = sy / sw, num = 0, den = 0;
+    pts.forEach(function (p) { var w = p.w || 1; num += w * (p.x - mx) * (p.y - my); den += w * (p.x - mx) * (p.x - mx); });
+    var slope = den ? num / den : 0; return { slope: slope, intercept: my - slope * mx };
+  }
+  function yearFrac(d) { d = isoDate(d); var p = d.split('-'), y = +p[0], st = Date.UTC(y, 0, 1), en = Date.UTC(y + 1, 0, 1); return y + (Date.UTC(y, +p[1] - 1, +p[2]) - st) / (en - st); }
+  /** 趨勢摘要：points = [{ d, v, w }]；在 from ~ to 之間計算加權平均、斜率（每年）、期間變化量、與基準的差 */
+  function trendSummary(points, from, to, baseline, flatBand) {
+    var ps = (points || []).filter(function (p) { return (!from || p.d >= from) && (!to || p.d <= to); });
+    var sw = 0, sv = 0; ps.forEach(function (p) { sw += p.w || 1; sv += (p.w || 1) * p.v; });
+    if (!ps.length) return { n: 0, w: 0, mean: null, slope: 0, change: 0, dir: 'flat', vsBase: null, start: null, end: null };
+    var fit = linFit(ps.map(function (p) { return { x: yearFrac(p.d), y: p.v, w: p.w || 1 }; }));
+    var x0 = yearFrac(from || ps[0].d), x1 = yearFrac(to || ps[ps.length - 1].d), mean = sv / sw;
+    var start = fit.intercept + fit.slope * x0, end = fit.intercept + fit.slope * x1, change = ps.length > 1 ? end - start : 0;
+    var band = flatBand === undefined ? 0.25 : flatBand, slope = ps.length > 1 ? fit.slope : 0;
+    return { n: ps.length, w: sw, mean: mean, slope: slope, change: change, start: start, end: end, fit: fit,
+      dir: Math.abs(slope) < band ? 'flat' : slope > 0 ? 'up' : 'down', vsBase: baseline === undefined || baseline === null ? null : mean - baseline };
+  }
+  function inspScore(i) {
+    var ism = 0, non = 0, ds = i.defs || [];
+    ds.forEach(function (d) { if (normCode(d.code).slice(0, 2) === '15') ism++; else non++; });
+    var extra = (Number(i.def_count) || 0) - ds.length; if (extra > 0) non += extra;
+    return ism * 5 + non;
+  }
+  /** 每次檢查一點（v = ISM×5 + 其他缺失，即單次檢查的缺失比） */
+  function inspTrendPoints(insps) { return (insps || []).filter(function (i) { return isoDate(i.date); }).map(function (i) { return { d: isoDate(i.date), v: inspScore(i), w: 1, ref: i }; }).sort(function (a, b) { return a.d < b.d ? -1 : 1; }); }
+  /** 依季彙整（v = 該季缺失比，w = 檢查次數） */
+  function quarterTrendPoints(insps) {
+    var q = {};
+    (insps || []).forEach(function (i) { var d = isoDate(i.date); if (!d) return; var y = +d.slice(0, 4), qq = Math.floor((+d.slice(5, 7) - 1) / 3), k = y + '-Q' + (qq + 1), o = q[k] || (q[k] = { k: k, d: y + '-' + String(qq * 3 + 2).padStart(2, '0') + '-15', sum: 0, n: 0, det: 0, last: '' }); o.sum += inspScore(i); o.n++; if (d > o.last) o.last = d; if (i.det === true || yes(i.detention)) o.det++; });
+    var mx = ''; Object.keys(q).forEach(function (k) { if (q[k].last > mx) mx = q[k].last; });
+    return Object.keys(q).sort().map(function (k) { var o = q[k]; return { d: o.d > mx ? mx : o.d, v: o.sum / o.n, w: o.n, label: k, det: o.det }; });
+  }
+  /** 事故嚴重性依季彙整（v = 該季分數合計） */
+  function quarterIncidentPoints(incs, cfg) {
+    var q = {}, mx = ''; cfg = cfg || incRiskCfg();
+    (incs || []).forEach(function (x) { if (s(x.status) === STATUS.VOID) return; var d = isoDate(x.date); if (!d) return; var y = +d.slice(0, 4), qq = Math.floor((+d.slice(5, 7) - 1) / 3), k = y + '-Q' + (qq + 1), o = q[k] || (q[k] = { d: y + '-' + String(qq * 3 + 2).padStart(2, '0') + '-15', v: 0, n: 0 }); o.v += incidentScore(x, cfg); o.n++; if (d > mx) mx = d; });
+    return Object.keys(q).sort().map(function (k) { return { d: q[k].d > mx ? mx : q[k].d, v: Math.round(q[k].v * 100) / 100, w: 1, n: q[k].n, label: k }; });
+  }
+
   /** 名單欄位：有分號或換行就用它們分隔（名稱本身可含逗號，如 Taiwan, China），否則用逗號 */
   function nameList(v) { v = s(v); return v.split(/[;\n]/.test(v) ? /[;\n]/ : /,/).map(function (x) { return s(x); }).filter(function (x) { return x; }); }
   var FLAG_ALIAS = { 'MARSHALL': 'MARSHALL ISLANDS', 'MHL': 'MARSHALL ISLANDS', 'TAIWAN, CHINA': 'TAIWAN', 'TAIWAN, REPUBLIC OF CHINA': 'TAIWAN', 'REPUBLIC OF CHINA': 'TAIWAN', 'ROC': 'TAIWAN', 'R.O.C.': 'TAIWAN', 'TWN': 'TAIWAN', 'CHINESE TAIPEI': 'TAIWAN',
@@ -1218,6 +1368,8 @@ var PSC = (function () {
       riskProfiles: store.all('RiskProfiles'), nkStatus: store.all('NKStatus'), mouMap: store.all('MOUMap'),
       rules: store.all('Rules'), ports: store.all('Ports')
     };
+    var tplRows = []; try { tplRows = store.all('Templates'); } catch (e) { tplRows = []; }
+    out.templates = templatesOf(tplRows);
     if (!out.rules.length) out.rules = DEFAULT_RULES.map(function (r) { return Object.assign({}, r); });
     if (!out.mouMap.length) out.mouMap = DEFAULT_MOU.map(function (r) { return Object.assign({}, r); });
     out.canBribe = canBribe(user, out.settings);
@@ -1259,6 +1411,9 @@ var PSC = (function () {
       case 'saveUser': return adminSave(store, user, 'Users', 'email', payload);
       case 'saveVessel': return adminSave(store, user, 'Vessels', 'imo', payload);
       case 'saveSetting': return adminSave(store, user, 'Settings', 'key', payload);
+      case 'saveTemplate': return adminSave(store, user, 'Templates', 'code', payload);
+      case 'saveCompany': return adminSave(store, user, 'Companies', 'code', payload);
+      case 'logReply': return store.lock(function () { return logReply(store, user, payload); });
       case 'saveSettings': return (payload.rows || []).map(function (r) { return adminSave(store, user, 'Settings', 'key', r); });
       case 'importRisk': return store.lock(function () { return importRisk(store, user, payload); });
       case 'importNK': return store.lock(function () { return importNK(store, user, payload); });
@@ -1276,7 +1431,7 @@ var PSC = (function () {
     deadlines: deadlines, pscTier: pscTier, vesselAt: vesselAt, handle: handle,
     BRIBE_FIELDS: BRIBE_FIELDS, parseBribe: parseBribe, bribeFlag: bribeFlag, canBribe: canBribe, num: num,
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
-    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
+    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
     TOKYO: TOKYO, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
     incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
     DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,

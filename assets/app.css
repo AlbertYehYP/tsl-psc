@@ -340,3 +340,83 @@ tr.click:hover td{background:var(--surface-2)}
 .ramp{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2)}
 .ramp i{display:inline-block;width:160px;height:10px;border-radius:999px}
 .mp-brush .selection{fill:var(--accent);fill-opacity:.12;stroke:var(--accent)}
+
+/* 回信範本 */
+.tpl-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.tpl-sug{display:inline-block;margin-left:4px;padding:0 5px;border-radius:4px;background:var(--warn-soft);color:var(--warn-ink);font-size:11px;font-weight:600}
+.chip[aria-pressed="true"] .tpl-sug{background:rgba(255,255,255,.22);color:inherit}
+.tpl-body{font-size:13px;line-height:1.6;white-space:pre-wrap;min-height:320px;resize:vertical}
+.tpl-var{border:1px solid var(--line-2);background:var(--surface-2);border-radius:4px;padding:0 4px;margin:2px 0;font-family:var(--f-mono);font-size:11px;cursor:pointer;color:var(--ink-2)}
+.tpl-var:hover{border-color:var(--accent);color:var(--accent)}
+.modal:has(.tpl-body){width:min(980px,100%)}
+
+/* 趨勢圖（拖曳時間軸） */
+.tr-wrap{display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:16px;align-items:start}
+@media (max-width:860px){.tr-wrap{grid-template-columns:1fr}}
+.tr-svg{width:100%;height:auto;display:block;overflow:visible}
+.tr-axis text{fill:var(--muted);font-size:10.5px;font-family:var(--f-sans)}
+.tr-axis line{stroke:var(--line)}.tr-axis path{stroke:var(--line-2)}
+.tr-base{stroke:var(--rk-vl);stroke-width:1.5;stroke-dasharray:6 4}
+.tr-base.ctx{stroke-width:1;opacity:.7}
+.tr-base-lbl{fill:var(--rk-vl);font-size:11px;font-weight:600;paint-order:stroke;stroke:var(--surface);stroke-width:3px}
+.tr-roll{fill:none;stroke:var(--accent);stroke-width:2.2}
+.tr-roll.ctx{stroke-width:1.2;opacity:.8}
+.tr-dot{fill:var(--surface);stroke:var(--accent);stroke-width:1.6;cursor:pointer;transition:opacity .2s}
+.tr-dot.over{stroke:var(--rk-vl);fill:var(--rk-vl-soft)}
+.tr-dot.ctx{stroke-width:.8;cursor:default}
+.tr-reg{stroke:var(--ink-2);stroke-width:1.6;stroke-dasharray:3 3}
+.tr-reg.up{stroke:var(--rk-vl)}.tr-reg.down{stroke:var(--rk-h)}
+.tr-hint{fill:var(--muted);font-size:10.5px}
+.tr-brush .selection{fill:var(--accent);fill-opacity:.12;stroke:var(--accent);stroke-opacity:.6}
+.tr-brush .handle{fill:var(--accent);fill-opacity:.55;rx:2}
+.tr-stats{display:grid;gap:10px;align-content:start}
+.tr-st{display:grid;gap:1px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.tr-st:last-child{border-bottom:0}
+.tr-st>span{font-size:11.5px;color:var(--muted)}
+.tr-st b{font-size:16px;font-weight:700}
+.tr-st em{font-style:normal;font-size:12px;color:var(--ink-2)}
+.tr-st em.bad{color:var(--rk-vl)}.tr-st em.ok{color:var(--rk-h)}
+.tr-up{color:var(--rk-vl)}.tr-down{color:var(--rk-h)}.tr-flat{color:var(--ink-2)}
+.tr-st.verdict .rk{white-space:normal;line-height:1.5;padding:3px 8px}
+.tr-rng .chip{padding:2px 10px;font-size:12px}
+
+/* 事故卡片：年度嚴重性長條 */
+.ybars{display:inline-flex;align-items:flex-end;gap:3px;height:30px;margin-left:auto}
+.yb{display:grid;grid-template-rows:1fr auto;justify-items:center;width:18px;height:30px}
+.yb i{display:block;width:12px;align-self:end;border-radius:2px 2px 0 0;background:var(--line-2)}
+.yb small{font-size:9.5px;color:var(--muted);line-height:1}
+.rkb-vl{background:var(--rk-vl)!important}.rkb-l{background:var(--rk-l)!important}.rkb-m{background:var(--rk-m)!important}.rkb-h{background:var(--rk-h)!important}
+.icard .rkline{width:100%}
+
+/* PSC 高風險：紅框＋慢速燈條沿邊框繞行 10 秒（兩圈），結束後留下紅框 */
+@property --lb{syntax:'<angle>';inherits:false;initial-value:0deg}
+.alarm{position:relative;isolation:isolate}
+.alarm::before,.alarm::after{content:"";position:absolute;inset:-3px;border-radius:calc(var(--r) + 3px);padding:3px;pointer-events:none;
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.alarm::before{background:var(--rk-vl);animation:frameOn 10s linear 1 both}
+.alarm::after{background:conic-gradient(from var(--lb),transparent 0deg,transparent 200deg,color-mix(in srgb,var(--rk-vl) 30%,transparent) 260deg,var(--rk-vl) 330deg,#ffd9d2 350deg,#fff 354deg,var(--rk-vl) 358deg,transparent 360deg);
+  animation:lightbar 10s linear 1 both}
+@keyframes lightbar{0%{--lb:0deg;opacity:0}5%{opacity:1}92%{opacity:1}100%{--lb:720deg;opacity:0}}
+@keyframes frameOn{0%{opacity:.18}88%{opacity:.25}100%{opacity:.85}}
+.alarm-key{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)}
+.alarm-key::before{content:"";width:22px;height:14px;border-radius:4px;border:2px solid var(--rk-vl)}
+@media (prefers-reduced-motion:reduce){.alarm::after{animation:none;opacity:0}.alarm::before{animation:none;opacity:.85}}
+
+/* 船舶事故時間軸 */
+.ysevs{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.ysev{display:grid;gap:2px;min-width:132px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2)}
+.ysev b{font-size:15px}.ysev small{font-size:11.5px;color:var(--ink-2)}.ysev .rk{justify-self:start;margin-top:2px}
+.rkbg-vl{background:var(--rk-vl-soft);border-color:transparent}.rkbg-l{background:var(--rk-l-soft);border-color:transparent}.rkbg-m{background:var(--rk-m-soft);border-color:transparent}
+.tl-year{margin-top:6px}
+.tl-yh{display:flex;align-items:center;gap:10px;padding:10px 0 6px;position:sticky;top:0;background:var(--surface);z-index:1}
+.tl-yh b{font-size:17px}
+.tl{list-style:none;margin:0 0 6px;padding:0 0 0 10px;border-left:2px solid var(--line-2);display:grid;gap:2px}
+.tl-it{position:relative;display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;padding:8px 10px 8px 14px;border-radius:10px;cursor:pointer}
+.tl-it:hover,.tl-it:focus-visible{background:var(--surface-2)}
+.tl-dot{position:absolute;left:-17px;top:13px;width:12px;height:12px;border-radius:50%;background:var(--surface);border:2px solid var(--muted)}
+.tl-it.t1 .tl-dot{border-color:var(--rk-vl);background:var(--rk-vl)}.tl-it.t2 .tl-dot{border-color:var(--rk-l)}.tl-it.t3 .tl-dot{border-color:var(--rk-m)}
+.tl-it.void{opacity:.5}
+.tl-date{font-size:12.5px;color:var(--ink-2);padding-top:1px}
+.tl-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.tl-sum{margin:3px 0 2px;line-height:1.5}
+@media (max-width:600px){.tl-it{grid-template-columns:1fr}.tl-date{order:-1}}

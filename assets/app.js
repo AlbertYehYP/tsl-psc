@@ -4,7 +4,7 @@
 const CFG = Object.assign({ apiUrl: '', googleClientId: '', demo: false, orgName: '德翔海技 TSL MARTEC', systemName: 'TSL 船隊事故追蹤系統' }, window.PSC_CONFIG || {});
 const CAT = PSC.CATEGORIES, ACT = PSC.ACTIONS, ST = PSC.STATUS;
 const SECTIONS = {
-  inc: { tabs: [['inc-overview', '事故分析'], ['incidents', '事故登錄與處理'], ['inc-rules', '事故規範']] },
+  inc: { tabs: [['inc-overview', '事故分析'], ['inc-vessels', '船舶事故'], ['incidents', '事故登錄與處理'], ['inc-rules', '事故規範']] },
   psc: { tabs: [['overview', '總覽'], ['map', '地圖'], ['inspections', '檢查登錄'], ['records', '缺失查詢'], ['vessels', '船舶檔案'], ['window', 'PSC 窗口'], ['bribe', '索賄分析'], ['codes', '代碼參考']] },
   admin: { tabs: [['admin', '系統管理']] }
 };
@@ -189,7 +189,7 @@ function buildModel(raw) {
   const incByNo = new Map(incidents.map(x => [x.tracking_no, x]));
   const lastInc = incidents.length ? incidents[0].date : '';
   return { insp, recs, vreg, byId, incidents, incByNo, asof: [insp.length ? insp[0].date : '', lastInc].sort().pop(), settings: raw.settings || {}, users: raw.users || [], vessels: raw.vessels || [],
-    companies: raw.companies || [], risk: raw.riskProfiles || [], nk: raw.nkStatus || [], mouMap: raw.mouMap || [], canBribe: !!raw.canBribe,
+    templates: raw.templates || PSC.templatesOf([]), companies: raw.companies || [], risk: raw.riskProfiles || [], nk: raw.nkStatus || [], mouMap: raw.mouMap || [], canBribe: !!raw.canBribe,
     rules: raw.rules || [], ports: raw.ports || [], docsByNo };
 }
 const vkey = x => String(x.imo || x.vessel);
@@ -408,6 +408,182 @@ function perfBase(c) {
   const d = new Date(today() + 'T00:00:00'); d.setMonth(d.getMonth() - 36); const from = d.toISOString().slice(0, 10);
   return M.insp.filter(I => I.date >= from && I.mou === PSC.TOKYO);
 }
+/* ---------- 趨勢圖：拖曳下方時間軸選期間，計算平均、斜率、期間變化量，並與基準線比較 ---------- */
+function trendBlockHTML(id, title, sub) {
+  return `<div class="card trend" id="${id}" style="margin-bottom:16px"><div class="section-head"><div><h2>${title}</h2><p class="sub" style="margin:2px 0 0">${sub}</p></div><div class="btnrow tr-rng">${[['all', '全部'], ['36', '近 3 年'], ['24', '近 2 年'], ['12', '近 12 個月']].map(([k, l]) => `<button class="chip" type="button" data-rng="${k}" aria-pressed="${k === 'all'}">${l}</button>`).join('')}</div></div><div class="tr-wrap"><div class="tr-chart"></div><div class="tr-stats"></div></div></div>`;
+}
+const iso = d => d.toISOString().slice(0, 10);
+function trendVerdict(t, o) {
+  if (!t.n) return '';
+  const up = t.dir === 'up', down = t.dir === 'down';
+  if (o.baseKind === 'tmou') {
+    if (t.vsBase > 0 && up) return perfPill('VERY LOW', '高於 Tokyo MOU 基準且上升：優先介入');
+    if (t.vsBase > 0) return perfPill('LOW', down ? '高於基準，趨勢改善中：持續追蹤' : '高於基準：需要改善');
+    if (up) return perfPill('MEDIUM', '低於基準但上升：提前預防');
+    return perfPill('HIGH', down ? '低於基準且下降：維持' : '低於基準且平穩：維持');
+  }
+  if (up) return perfPill(t.vsBase > 0 ? 'VERY LOW' : 'LOW', '嚴重性上升：檢討原因');
+  if (down) return perfPill('HIGH', '嚴重性下降');
+  return perfPill(t.vsBase > 0 ? 'MEDIUM' : 'HIGH', '平穩');
+}
+function trendChart(card, o) {
+  if (!card) return;
+  const chart = card.querySelector('.tr-chart'), stats = card.querySelector('.tr-stats'), d3 = window.d3;
+  const pts = (o.points || []).slice().sort((a, b) => a.d < b.d ? -1 : 1);
+  if (!d3) { chart.innerHTML = '<div class="empty">圖表元件（d3）載入失敗，請確認網路可連到 cdn.jsdelivr.net。</div>'; return; }
+  if (!pts.length) { chart.innerHTML = '<div class="empty">沒有資料</div>'; stats.innerHTML = ''; return; }
+  const fmtV = o.fmt || (v => v.toFixed(2)), roll = o.roll || 3, base = o.baseline, band = o.band === undefined ? 0.25 : o.band;
+  const P = pts.map(p => Object.assign({}, p, { t: new Date(p.d + 'T00:00:00Z') }));
+  P.forEach((p, i) => { const win = P.slice(Math.max(0, i - roll + 1), i + 1); const sw = win.reduce((m, q) => m + (q.w || 1), 0); p.r = win.reduce((m, q) => m + q.v * (q.w || 1), 0) / sw; });
+  const W = Math.max(320, chart.clientWidth || 640), m = { t: 14, r: 16, b: 22, l: 40 }, H1 = 210, H2 = 48, GAP = 44, H = m.t + H1 + GAP + H2 + 18;
+  const tf = dt => dt.getUTCMonth() === 0 ? d3.utcFormat('%Y')(dt) : (dt.getUTCMonth() + 1) + '月', nt = Math.min(8, Math.round(W / 110));
+  const dMin = P[0].d, dMax = P[P.length - 1].d, clampD = (a, b) => [a < dMin ? dMin : a, b > dMax ? dMax : b];
+  let lo = P[0].t, hi = P[P.length - 1].t; if (hi - lo < 120 * 864e5) { lo = new Date(+lo - 60 * 864e5); hi = new Date(+hi + 60 * 864e5); }
+  const pad = (hi - lo) * 0.03, full = [new Date(+lo - pad), new Date(+hi + pad)];
+  const yMax = Math.max(d3.max(P, p => Math.max(p.v, p.r)), base || 0) * 1.15 || 1;
+  const x = d3.scaleUtc().domain(full).range([m.l, W - m.r]), x2 = x.copy(), y = d3.scaleLinear().domain([0, yMax]).nice().range([m.t + H1, m.t]);
+  const y2 = d3.scaleLinear().domain(y.domain()).range([m.t + H1 + GAP + H2, m.t + H1 + GAP]);
+  const cid = 'clip-' + card.id;
+  chart.innerHTML = '';
+  const svg = d3.select(chart).append('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('class', 'tr-svg').attr('role', 'img').attr('aria-label', o.aria || '趨勢圖');
+  svg.append('clipPath').attr('id', cid).append('rect').attr('x', m.l).attr('y', m.t - 6).attr('width', W - m.l - m.r).attr('height', H1 + 12);
+  const gy = svg.append('g').attr('class', 'tr-axis').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(4).tickSize(-(W - m.l - m.r)));
+  gy.select('.domain').remove();
+  const gx = svg.append('g').attr('class', 'tr-axis').attr('transform', `translate(0,${m.t + H1})`);
+  const main = svg.append('g').attr('clip-path', `url(#${cid})`);
+  if (base !== null && base !== undefined) {
+    svg.append('line').attr('class', 'tr-base').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(base)).attr('y2', y(base));
+    svg.append('text').attr('class', 'tr-base-lbl').attr('x', W - m.r - 4).attr('y', y(base) - 5).attr('text-anchor', 'end').text(`${o.baseLabel || '基準'} ${fmtV(base)}`);
+  }
+  const rollLine = d3.line().x(p => x(p.t)).y(p => y(p.r)).curve(d3.curveMonotoneX);
+  const pathR = main.append('path').attr('class', 'tr-roll');
+  const reg = main.append('line').attr('class', 'tr-reg');
+  const rad = p => o.agg ? 2.5 + Math.min(5, Math.sqrt(p.w || 1) * 0.9) : 3.6;
+  const dots = main.selectAll('circle').data(P).join('circle').attr('class', p => 'tr-dot' + (base !== null && base !== undefined && p.v > base ? ' over' : '')).attr('r', rad)
+    .on('mousemove', (e, p) => showTip(e, (o.tip ? o.tip(p) : `<b>${p.label || dfmt(p.d)}</b><div class="row"><span>${o.yLabel || '值'}</span><span>${fmtV(p.v)}</span></div>`) + `<div class="row"><span>移動平均</span><span>${fmtV(p.r)}</span></div>`))
+    .on('mouseleave', hideTip).on('click', (e, p) => { if (o.onClick) o.onClick(p); });
+  // context strip + brush
+  svg.append('g').attr('class', 'tr-axis').attr('transform', `translate(0,${m.t + H1 + GAP + H2})`).call(d3.axisBottom(x2).ticks(nt).tickFormat(tf).tickSizeOuter(0));
+  svg.append('path').attr('class', 'tr-roll ctx').attr('d', d3.line().x(p => x2(p.t)).y(p => y2(p.r)).curve(d3.curveMonotoneX)(P));
+  svg.selectAll('circle.ctx').data(P).join('circle').attr('class', 'tr-dot ctx').attr('r', 1.6).attr('cx', p => x2(p.t)).attr('cy', p => y2(p.v));
+  if (base !== null && base !== undefined) svg.append('line').attr('class', 'tr-base ctx').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y2(base)).attr('y2', y2(base));
+  svg.append('text').attr('class', 'tr-hint').attr('x', W - m.r).attr('text-anchor', 'end').attr('y', m.t + H1 + GAP - 5).text('↔ 拖曳下方時間軸、拉動兩側把手選擇期間');
+  const draw = dom => {
+    x.domain(dom);
+    gx.call(d3.axisBottom(x).ticks(nt).tickFormat(tf).tickSizeOuter(0));
+    dots.attr('cx', p => x(p.t)).attr('cy', p => y(p.v)).attr('opacity', p => p.t >= dom[0] && p.t <= dom[1] ? 1 : 0.25);
+    pathR.attr('d', rollLine(P));
+    const t = PSC.trendSummary(pts, iso(dom[0]), iso(dom[1]), base, band);
+    if (t.n > 1) { const x0 = PSC.yearFrac(iso(dom[0])), x1 = PSC.yearFrac(iso(dom[1])); reg.attr('x1', x(dom[0])).attr('x2', x(dom[1])).attr('y1', y(Math.max(0, t.fit.intercept + t.fit.slope * x0))).attr('y2', y(Math.max(0, t.fit.intercept + t.fit.slope * x1))).attr('opacity', 1).attr('class', 'tr-reg ' + t.dir); }
+    else reg.attr('opacity', 0);
+    const arrow = { up: '↗ 上升', down: '↘ 下降', flat: '→ 持平' }[t.dir];
+    const sgn = v => (v > 0 ? '+' : v < 0 ? '−' : '±') + fmtV(Math.abs(v));
+    const shown = clampD(iso(dom[0]), iso(dom[1]));
+    stats.innerHTML = t.n ? `<div class="tr-st"><span>期間</span><b class="num">${dfmt(shown[0])} ~ ${dfmt(shown[1])}</b></div>
+      <div class="tr-st"><span>樣本</span><b class="num">${t.n} ${o.agg ? '季' : '次檢查'}${o.agg && o.unitN ? `・${fmt(t.w)} ${o.unitN}` : ''}</b></div>
+      <div class="tr-st"><span>${o.meanLabel || '平均'}</span><b class="num">${fmtV(t.mean)}</b>${t.vsBase !== null ? (Math.abs(t.vsBase) < 0.005 ? `<em>與${o.baseLabel || '基準'}相同</em>` : `<em class="${t.vsBase > 0 ? 'bad' : 'ok'}">${t.vsBase > 0 ? '高於' : '低於'}${o.baseLabel || '基準'} ${fmtV(Math.abs(t.vsBase))}</em>`) : ''}</div>
+      <div class="tr-st"><span>趨勢（每年）</span><b class="num tr-${t.dir}">${arrow} ${sgn(t.slope)}</b></div>
+      <div class="tr-st"><span>期間變化量</span><b class="num tr-${t.dir}">${sgn(t.change)}</b><em>${fmtV(Math.max(0, t.start))} → ${fmtV(Math.max(0, t.end))}</em></div>
+      <div class="tr-st verdict">${trendVerdict(t, o)}</div>` : '<div class="empty">此期間沒有資料</div>';
+  };
+  const brush = d3.brushX().extent([[m.l, m.t + H1 + GAP], [W - m.r, m.t + H1 + GAP + H2]])
+    .on('brush end', ({ selection, sourceEvent }) => { const dom = selection && selection[1] - selection[0] > 4 ? selection.map(x2.invert) : full; draw(dom); if (sourceEvent) card.querySelectorAll('[data-rng]').forEach(b => b.setAttribute('aria-pressed', 'false')); });
+  const bg = svg.append('g').attr('class', 'tr-brush').call(brush);
+  const setRange = k => {
+    card.querySelectorAll('[data-rng]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.rng === k)));
+    if (k === 'all') { bg.call(brush.move, [x2(full[0]), x2(full[1])]); return; }
+    const end = full[1], st = new Date(end); st.setUTCMonth(st.getUTCMonth() - Number(k));
+    bg.call(brush.move, [x2(st < full[0] ? full[0] : st), x2(end)]);
+  };
+  card.querySelectorAll('[data-rng]').forEach(b => b.addEventListener('click', () => setRange(b.dataset.rng)));
+  setRange(o.initial || 'all');
+}
+
+/* ---------- 事故管理：船舶事故卡片、年度嚴重性風險、事故時間軸 ---------- */
+const IRK = { H: { c: 'vl', t: '高風險' }, E: { c: 'l', t: '偏高風險' }, M: { c: 'm', t: '一般' }, L: { c: 'h', t: '低風險' } };
+const irkPill = (lv, txt) => { const m = IRK[lv] || IRK.L; return `<span class="rk rk-${m.c}">${txt || m.t}</span>`; };
+const PSC_HIGH = p => p === 'VERY LOW' || p === 'LOW';
+function shipPsc(k) {
+  const V = M.vreg[k]; if (!V) return PSC.perfIndex([], PSC.tmouAvg(M.settings));
+  let ins = V.insp;
+  if (S.perfBasis === '36m') { const d = new Date(today() + 'T00:00:00'); d.setMonth(d.getMonth() - 36); const from = d.toISOString().slice(0, 10); ins = ins.filter(I => I.date >= from && I.mou === PSC.TOKYO); }
+  return PSC.perfIndex(ins, PSC.tmouAvg(M.settings));
+}
+function yearBarsHTML(years, cfg, from) {
+  const ys = Object.keys(years).map(Number); const y1 = new Date().getFullYear(), y0 = from || Math.min(...ys.concat([y1]));
+  const top = Math.max(cfg.levels[0] * 1.4, ...Object.values(years).map(o => o.score));
+  const out = []; for (let y = y0; y <= y1; y++) { const o = years[y] || { score: 0, n: 0, level: 'L' }; out.push(`<span class="yb" title="${y}：${o.n} 件、${o.score} 分"><i class="rkb-${IRK[o.level].c}" style="height:${o.score ? Math.max(8, Math.round(o.score / top * 100)) : 0}%"></i><small>${String(y).slice(2)}</small></span>`); }
+  return `<span class="ybars">${out.join('')}</span>`;
+}
+function vIncVessels(v) {
+  if (S.incVessel) return incVesselDetail(v, S.incVessel);
+  const cfg = PSC.incRiskCfg(M.settings), list = incList(), by = {};
+  list.forEach(x => { (by[vkey(x)] || (by[vkey(x)] = [])).push(x); });
+  const allBy = {}; M.incidents.forEach(x => { if (!x.void) (allBy[vkey(x)] || (allBy[vkey(x)] = [])).push(x); });
+  const rows = Object.keys(by).map(k => {
+    const xs = by[k], r = PSC.incidentRisk(allBy[k] || [], cfg, today()), V = M.vreg[k] || {}, p = shipPsc(k);
+    return { k, xs, r, V, name: V.name || xs[0].vessel, zh: V.zh || '', co: (V.cur && V.cur.company) || xs[0].company, open: xs.filter(x => x.status === ST.OPEN).length, last: xs[0].date, psc: p };
+  });
+  const sorts = { risk: (a, b) => b.r.last12 - a.r.last12 || b.xs.length - a.xs.length, n: (a, b) => b.xs.length - a.xs.length || b.r.last12 - a.r.last12, last: (a, b) => a.last < b.last ? 1 : -1 };
+  const sk = sorts[S.ivSort] ? S.ivSort : 'risk'; rows.sort((a, b) => sorts[sk](a, b) || (a.name < b.name ? -1 : 1));
+  const cnt = {}; rows.forEach(r => { cnt[r.r.level] = (cnt[r.r.level] || 0) + 1; });
+  const w = cfg.w, lv = cfg.levels;
+  v.innerHTML = trendBlockHTML('tr-inc', '船隊事故嚴重性趨勢', '每季事故分數合計（依下方計分方式），虛線為全期每季平均。依目前的管理公司、船舶與關鍵字篩選，不受年度篩選影響；拖曳下方時間軸選擇期間。') +
+  `<div class="card perf-legend"><div class="pl-row"><span><b class="num">${rows.length}</b> 艘船有事故紀錄（依篩選條件）</span><label class="pl-sel">排序 <select id="iv-sort">${opt('risk', '近 12 個月風險分數', sk === 'risk')}${opt('n', '事故件數', sk === 'n')}${opt('last', '最近事故', sk === 'last')}</select></label></div>
+  <div class="pl-row">${['H', 'E', 'M', 'L'].map(k => `${irkPill(k)}<span class="num dim" style="margin-right:8px">${cnt[k] || 0}</span>`).join('')}<span class="alarm-key">PSC 高風險船（Tokyo MOU 績效 Low / Very Low）</span></div>
+  <p class="note" style="margin:0">計分：Tier 1 = ${w.tier1} 分、Tier 2 = ${w.tier2}、Tier 3 = ${w.tier3}；4.1 重大事件另加 ${w.major}；PSC 檢查產生的事故 × ${w.psc}；作廢不計。近 12 個月 ≥ ${lv[0]} 分為高風險、≥ ${lv[1]} 偏高、≥ ${lv[2]} 一般。長條為每年分數。可在「事故規範 → 事故風險計分」調整。</p></div>
+  <div class="vgrid">${rows.length ? rows.map(o => { const m = IRK[o.r.level], ph = PSC_HIGH(o.psc.performance); const t = { 1: 0, 2: 0, 3: 0 }; o.xs.forEach(x => { if (t[x.tier] !== undefined) t[x.tier]++; });
+    return `<button type="button" class="vcard icard risk-${m.c}${ph ? ' alarm' : ''}" data-iv="${esc(o.k)}"><span class="nm">${esc(o.name)}${o.open ? ` <span class="stp stp-open">進行中 ${o.open}</span>` : ''}${ph ? ` <span class="rk rk-vl" title="Tokyo MOU 績效 ${esc(o.psc.performance)}">PSC 高風險</span>` : ''}</span><span class="zh">${[esc(o.zh), esc(o.co || '')].filter(Boolean).join(' · ')}</span>
+    <span class="st"><span><b class="num">${o.xs.length}</b> 件</span>${['1', '2', '3'].map(k => t[k] ? `<span>${tierPill(k)} <b class="num">${t[k]}</b></span>` : '').join('')}</span>
+    <span class="st rkline">${irkPill(o.r.level)}<span>近 12 個月 <b class="num">${o.r.last12}</b> 分</span>${yearBarsHTML(o.r.years, cfg, new Date().getFullYear() - 3)}</span><span class="st dim">最近 ${dfmt(o.last)}</span></button>`; }).join('') : '<div class="empty">沒有符合條件的事故</div>'}</div>`;
+  const base = M.incidents.filter(x => !x.void && incMatchNoYear(x)), qp = PSC.quarterIncidentPoints(base, cfg);
+  const avgQ = qp.length ? qp.reduce((s2, p) => s2 + p.v, 0) / qp.length : null;
+  trendChart($('#tr-inc'), { points: qp, baseline: avgQ, baseLabel: '全期季平均', baseKind: 'ref', agg: true, roll: 2, band: 2, fmt: v => v.toFixed(1), yLabel: '季分數', meanLabel: '平均每季分數', tip: p => `<b>${esc(p.label)}</b><div class="row"><span>事故</span><span>${p.n} 件</span></div><div class="row"><span>分數</span><span>${p.v}</span></div>` });
+  v.querySelectorAll('[data-iv]').forEach(b => b.addEventListener('click', () => { S.incVessel = b.dataset.iv; render(); window.scrollTo({ top: 0 }); }));
+  $('#iv-sort').addEventListener('change', e => { S.ivSort = e.target.value; render(); });
+}
+function incMatchNoYear(x) { const y = S.years; S.years = new Set(); try { return incMatch(x); } finally { S.years = y; } }
+function inspMatchNoYear(I) { const y = S.years; S.years = new Set(); try { return inspMatch(I); } finally { S.years = y; } }
+function incVesselDetail(v, k) {
+  const cfg = PSC.incRiskCfg(M.settings), xs = M.incidents.filter(x => vkey(x) === k).sort((a, b) => a.date < b.date ? 1 : -1);
+  const V = M.vreg[k] || {}, name = V.name || (xs[0] && xs[0].vessel) || k, r = PSC.incidentRisk(xs, cfg, today()), p = shipPsc(k), ph = PSC_HIGH(p.performance);
+  const byY = {}; xs.forEach(x => { (byY[x.y] || (byY[x.y] = [])).push(x); });
+  const ys = Object.keys(r.years).map(Number), y1 = new Date().getFullYear(), y0 = ys.length ? Math.min(...ys) : y1;
+  const strip = []; for (let y = y1; y >= y0; y--) { const o = r.years[y] || { score: 0, n: 0, t1: 0, t2: 0, t3: 0, major: 0, level: 'L' }; strip.push(`<div class="ysev rkbg-${IRK[o.level].c}"><b>${y}</b><span class="num">${o.score} 分</span><small>${o.n} 件${o.n ? `・T1 ${o.t1}・T2 ${o.t2}・T3 ${o.t3}${o.major ? `・4.1 ${o.major}` : ''}` : ''}</small>${irkPill(o.level)}</div>`); }
+  v.innerHTML = `<button class="backlink" type="button" id="iv-back">← 回到船舶事故</button>
+  <div class="card${ph ? ' alarm' : ''}" style="margin-bottom:16px;position:relative"><div class="vprof-head"><div><div class="eyebrow">船舶事故歷史</div><h2 style="font-size:20px;margin-top:2px">${esc(name)} <span class="dim" style="font-weight:400;font-size:15px">${esc(V.zh || '')}</span></h2>
+  <div class="dim" style="font-size:12.5px">IMO ${esc(V.imo || (xs[0] && xs[0].imo) || '—')}${V.cur ? `・${esc(V.cur.company)}・${esc(V.cur.manager || V.cur.management || '')}・PIC ${esc(V.cur.pic || '—')}` : ''}${V.former && V.former.length ? `・曾用名 ${esc(V.former.join('、'))}` : ''}</div></div>
+  <div class="btnrow">${irkPill(r.level, IRK[r.level].t + '・近 12 個月 ' + r.last12 + ' 分')}${p.n ? perfPill(p.performance, 'PSC ' + PERF_META[p.performance].t + '・' + PERF_META[p.performance].e) : ''}${V.insp && V.insp.length ? '<button class="btn" type="button" id="iv-psc">PSC 船舶檔案</button>' : ''}</div></div>
+  <div class="ysevs">${strip.join('')}</div></div>
+  <div class="card"><div class="section-head"><h2>事故時間軸（${xs.length} 件，有紀錄以來）</h2><span class="dim" style="font-size:12.5px">點一下開啟事故</span></div>
+  ${xs.length ? Object.keys(byY).sort((a, b) => b - a).map(y => `<div class="tl-year"><div class="tl-yh"><b>${y}</b>${irkPill((r.years[y] || {}).level || 'L', ((r.years[y] || {}).score || 0) + ' 分')}</div><ol class="tl">${byY[y].map(x => { const sc = PSC.incidentScore(x, cfg); return `<li class="tl-it t${esc(x.tier)}${x.void ? ' void' : ''}" data-no="${esc(x.tracking_no)}" tabindex="0"><span class="tl-dot"></span><span class="tl-date num">${dfmt(x.date)}</span><div class="tl-body"><div class="tl-head">${tierPill(x.tier)}<span class="mono" style="font-size:12px">${esc(x.tracking_no)}</span>${x.void ? '<span class="stp stp-hist">作廢</span>' : x.over ? '<span class="stp stp-over">RCA 逾期</span>' : `<span class="stp stp-${x.status === ST.OPEN ? 'open' : 'closed'}">${esc(x.status)}</span>`}${x.psc ? '<span class="pill cat">PSC</span>' : ''}${x.major_level ? `<span class="rk rk-vl">4.1 重大事件</span>` : ''}</div><div class="tl-sum">${esc(x.summary || '—')}</div><div class="dim" style="font-size:12px">${esc((PSC.rulesAt(M.rules, x.date).types[x.type] || {}).name || x.type)}${x.location ? '・' + esc(x.location) : ''}・PIC ${esc(x.pic || '—')}・${sc} 分</div></div></li>`; }).join('')}</ol></div>`).join('') : '<div class="empty">沒有事故紀錄</div>'}</div>`;
+  $('#iv-back').addEventListener('click', () => { S.incVessel = null; render(); });
+  const pb = $('#iv-psc'); if (pb) pb.addEventListener('click', () => openVessel(k));
+  v.querySelectorAll('.tl-it').forEach(li => { const go = () => openIncident(li.dataset.no); li.addEventListener('click', go); li.addEventListener('keydown', e => { if (e.key === 'Enter') go(); }); });
+}
+function incRiskCardHTML() {
+  const cfg = PSC.incRiskCfg(M.settings), w = cfg.w, lv = cfg.levels;
+  return `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>事故風險計分</h2><p class="sub" style="margin:2px 0 0">「船舶事故」卡片與時間軸用每年事故的嚴重性評估船舶風險。設定存在試算表 Settings 分頁（inc_risk_weights、inc_risk_levels）。</p></div>${can('admin') ? '<button class="btn" type="button" id="ir-edit">修改</button>' : ''}</div>
+  <div class="tbl-wrap"><table class="ref"><tbody><tr><td>每件事故</td><td>Tier 1 = <b>${w.tier1}</b> 分、Tier 2 = <b>${w.tier2}</b> 分、Tier 3 = <b>${w.tier3}</b> 分；屬 4.1 重大事件另加 <b>${w.major}</b> 分；由 PSC 檢查產生的事故 × <b>${w.psc}</b>；作廢不計</td></tr>
+  <tr><td>風險等級</td><td>近 12 個月（或單一年度）合計 ≥ <b>${lv[0]}</b> ${irkPill('H')}　≥ <b>${lv[1]}</b> ${irkPill('E')}　≥ <b>${lv[2]}</b> ${irkPill('M')}　其餘 ${irkPill('L')}</td></tr></tbody></table></div></div>`;
+}
+function editIncRisk() {
+  const set = M.settings;
+  openModal({ title: '事故風險計分', sub: '修改後立即套用到所有事故（含過去年度）',
+    html: `<div class="form"><div class="field"><label for="ir-w">計分（名稱=分數，以分號分隔）</label><input class="inp mono" id="ir-w" value="${esc(set.inc_risk_weights || PSC.DEFAULT_SETTINGS.find(d => d.key === 'inc_risk_weights').value)}"><span class="hint">tier1 / tier2 / tier3：各分級每件分數；major：4.1 重大事件加分；psc：PSC 事故係數</span></div>
+    <div class="field"><label for="ir-l">等級門檻（高風險; 偏高; 一般）</label><input class="inp mono" id="ir-l" value="${esc(set.inc_risk_levels || PSC.DEFAULT_SETTINGS.find(d => d.key === 'inc_risk_levels').value)}"></div><div id="ir-err" class="err"></div></div>`,
+    foot: '<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="ir-save">儲存</button>',
+    onMount(root, close) {
+      root.querySelector('[data-close]').addEventListener('click', close);
+      root.querySelector('#ir-save').addEventListener('click', () => {
+        const wv = root.querySelector('#ir-w').value.trim(), lv = root.querySelector('#ir-l').value.trim();
+        const nums = PSC.nameList(lv).map(Number);
+        if (nums.length !== 3 || nums.some(isNaN) || !(nums[0] >= nums[1] && nums[1] >= nums[2])) { root.querySelector('#ir-err').textContent = '門檻請填三個由大到小的數字，例如 15; 8; 3'; return; }
+        const d = k => PSC.DEFAULT_SETTINGS.find(x => x.key === k).note;
+        run(async () => { await api('saveSettings', { rows: [{ key: 'inc_risk_weights', value: wv, note: d('inc_risk_weights') }, { key: 'inc_risk_levels', value: lv, note: d('inc_risk_levels') }] }); await close(); await reload(); toast('已更新事故風險計分'); }, root.querySelector('#ir-save'));
+      });
+    } });
+}
 function companyPerfHTML(c, avg) {
   const base = perfBase(c), by = {};
   base.forEach(I => { (by[I.company] || (by[I.company] = [])).push(I); });
@@ -433,17 +609,24 @@ function vVessels(v) {
   const pb = {}; perfBase(c).forEach(I => { (pb[vkey(I)] || (pb[vkey(I)] = [])).push(I); });
   Object.keys(agg).forEach(k => { agg[k].p = PSC.perfIndex(pb[k] || [], avg); });
   let html = '';
-  if (S.profile && M.vreg[S.profile]) html += profileHTML(S.profile, c);
+  if (S.profile && M.vreg[S.profile]) html += profileHTML(S.profile, c) + `<div style="height:16px"></div>` + trendBlockHTML('tr-ship', `${esc(M.vreg[S.profile].name)} 缺失趨勢`, `每個點是一次檢查的缺失比（ISM 缺失 × 5 ＋ 其他缺失），實線為近 3 次移動平均，紅色虛線為 Tokyo MOU 平均缺失指數 ${avg.def}，斜線為所選期間的趨勢線。點一下開啟該次檢查。${M.incidents.some(x => vkey(x) === S.profile) ? ' <a href="#" id="to-inc-tl">查看這艘船的事故時間軸 →</a>' : ''}`);
   const sorts = { d: (a, b) => b.o.d - a.o.d || b.o.n - a.o.n, risk: (a, b) => (PERF_ORDER[a.o.p.performance] ?? 9) - (PERF_ORDER[b.o.p.performance] ?? 9) || (b.o.p.def_ratio || 0) - (a.o.p.def_ratio || 0), ratio: (a, b) => (b.o.p.def_ratio ?? -1) - (a.o.p.def_ratio ?? -1) };
   const sk = sorts[S.vSort] ? S.vSort : 'd';
   const list = Object.entries(agg).map(([k, o]) => ({ k, o, V: M.vreg[k] })).sort((a, b) => sorts[sk](a, b) || (a.V.name < b.V.name ? -1 : 1));
   const cnt = {}; list.forEach(x => { const p = x.o.p.performance || '—'; cnt[p] = (cnt[p] || 0) + 1; });
+  html += trendBlockHTML('tr-fleet', '船隊缺失趨勢', `每季缺失比 =（ISM 缺失 × 5 ＋ 其他缺失）÷ 檢查次數；紅色虛線為 Tokyo MOU 平均缺失指數 ${avg.def}（${esc(avg.valid)}）。依目前的管理公司、MOU、港口國篩選，不受年度篩選影響；拖曳下方時間軸選擇期間，看平均、趨勢與變化量。`);
   html += companyPerfHTML(c, avg);
   html += `<div class="card perf-legend"><div class="pl-row"><span><b class="num">${list.length}</b> 艘船有 PSC 紀錄（依篩選條件）</span><label class="pl-sel">期間 <select id="pf-basis">${opt('filter', '依目前篩選', S.perfBasis !== '36m')}${opt('36m', '近 36 個月 Tokyo MOU（官方算法）', S.perfBasis === '36m')}</select></label><label class="pl-sel">排序 <select id="pf-sort">${opt('d', '缺失件數', sk === 'd')}${opt('risk', '風險（高 → 低）', sk === 'risk')}${opt('ratio', '缺失比', sk === 'ratio')}</select></label></div>
   <div class="pl-row">${['VERY LOW', 'LOW', 'MEDIUM', 'HIGH'].map(p => `${perfPill(p)}<span class="num dim" style="margin-right:8px">${cnt[p] || 0}</span>`).join('')}${cnt['—'] ? `<span class="dim">無檢查 ${cnt['—']}</span>` : ''}</div>
   <p class="note" style="margin:0">依 Tokyo MOU 平均留置指數 <b>${avg.det}%</b>、平均缺失指數 <b>${avg.def}</b>（${esc(avg.valid)}）判定，算法與 Tokyo MOU 公司績效相同，套用在單船。可在「系統管理 → Tokyo MOU 年度指數與名單」更新。</p></div><div class="vgrid">` +
-    (list.length ? list.map(({ k, o, V }) => { const m = PERF_META[o.p.performance]; return `<button type="button" class="vcard${m ? ' risk-' + m.c : ''}" data-vc="${esc(k)}"><span class="nm">${esc(V.name)}${o.det ? ` <span class="pill det">留置 ${o.det}</span>` : ''}${o.open ? ` <span class="stp stp-open">進行中 ${o.open}</span>` : ''}</span><span class="zh">${esc(V.zh)}${V.former.length ? ` · 前 ${esc(V.former.join('、'))}` : ''}${V.cur ? ` · ${esc(V.cur.company)}` : ''}</span><span class="st"><span><b class="num">${o.n}</b> 次檢查</span><span><b class="num">${o.d}</b> 項缺失</span><span>NIL ${pct(o.nil, o.n)}</span></span><span class="st rkline">${m ? `<span class="rk rk-${m.c}">${m.t}</span><span>缺失比 <b class="num">${fix2(o.p.def_ratio)}</b></span><span>留置率 <b class="num">${o.p.det_rate.toFixed(1)}%</b></span>` : (S.perfBasis === '36m' ? '<span class="dim">近 36 個月無 Tokyo MOU 檢查</span>' : '<span class="dim">無檢查</span>')}</span><span class="st dim">最近 ${dfmt(o.last)}</span></button>`; }).join('') : '<div class="empty">沒有符合條件的船舶</div>') + '</div>';
+    (list.length ? list.map(({ k, o, V }) => { const m = PERF_META[o.p.performance]; return `<button type="button" class="vcard${m ? ' risk-' + m.c : ''}${PSC_HIGH(o.p.performance) ? ' alarm' : ''}" data-vc="${esc(k)}"><span class="nm">${esc(V.name)}${o.det ? ` <span class="pill det">留置 ${o.det}</span>` : ''}${o.open ? ` <span class="stp stp-open">進行中 ${o.open}</span>` : ''}</span><span class="zh">${esc(V.zh)}${V.former.length ? ` · 前 ${esc(V.former.join('、'))}` : ''}${V.cur ? ` · ${esc(V.cur.company)}` : ''}</span><span class="st"><span><b class="num">${o.n}</b> 次檢查</span><span><b class="num">${o.d}</b> 項缺失</span><span>NIL ${pct(o.nil, o.n)}</span></span><span class="st rkline">${m ? `<span class="rk rk-${m.c}">${m.t}</span><span>缺失比 <b class="num">${fix2(o.p.def_ratio)}</b></span><span>留置率 <b class="num">${o.p.det_rate.toFixed(1)}%</b></span>` : (S.perfBasis === '36m' ? '<span class="dim">近 36 個月無 Tokyo MOU 檢查</span>' : '<span class="dim">無檢查</span>')}</span><span class="st dim">最近 ${dfmt(o.last)}</span></button>`; }).join('') : '<div class="empty">沒有符合條件的船舶</div>') + '</div>';
   v.innerHTML = html;
+  const tmouT = { baseline: avg.def, baseLabel: 'Tokyo MOU 缺失指數', baseKind: 'tmou', yLabel: '缺失比', meanLabel: '平均缺失比' };
+  trendChart($('#tr-fleet'), Object.assign({}, tmouT, { points: PSC.quarterTrendPoints(M.insp.filter(inspMatchNoYear)), agg: true, roll: 4, unitN: '次檢查',
+    tip: p => `<b>${esc(p.label)}</b><div class="row"><span>檢查</span><span>${p.w} 次</span></div><div class="row"><span>缺失比</span><span>${p.v.toFixed(2)}</span></div>${p.det ? `<div class="row"><span>留置</span><span>${p.det}</span></div>` : ''}` }));
+  if (S.profile && M.vreg[S.profile]) trendChart($('#tr-ship'), Object.assign({}, tmouT, { points: PSC.inspTrendPoints(M.vreg[S.profile].insp.filter(inspMatchNoYear)), roll: 3, band: 0.5,
+    tip: p => `<b>${dfmt(p.d)}</b> <span class="dim">${esc(p.ref.port)}</span><div class="row"><span>缺失</span><span>${p.ref.defs.length} 項${p.ref.det ? '・留置' : ''}</span></div><div class="row"><span>缺失比</span><span>${p.v}</span></div>`, onClick: p => openCase(p.ref.insp_id) }));
+  const tl = $('#to-inc-tl'); if (tl) tl.addEventListener('click', e => { e.preventDefault(); const k = S.profile; S.profile = null; S.incVessel = k; setTab('inc-vessels'); S.incVessel = k; render(); });
   v.querySelectorAll('.vcard').forEach(b => b.addEventListener('click', () => openVessel(b.dataset.vc)));
   $('#pf-basis').addEventListener('change', e => { S.perfBasis = e.target.value; render(); });
   $('#pf-sort').addEventListener('change', e => { S.vSort = e.target.value; render(); });
@@ -825,22 +1008,114 @@ function incidentDetail(v, x) {
   v.innerHTML = `<button class="backlink" type="button" id="back">← 回到事故列表</button>
   <div class="card" style="margin-bottom:16px"><div class="vprof-head"><div style="min-width:0"><div class="eyebrow">事故追蹤編號</div><div class="tn-lg">${esc(base)}</div>${x.former_no ? `<div class="dim" style="font-size:12px">原編號 ${esc(x.former_no)}</div>` : ''}
   <div class="btnrow" style="margin-top:6px">${x.void ? '<span class="stp stp-hist">作廢</span>' : x.over ? '<span class="stp stp-over">進行中・RCA 逾期</span>' : `<span class="stp stp-${open ? 'open' : 'closed'}">${esc(x.status)}</span>`}${tierPill(x.tier)}<span class="mono">${esc(x.type)}</span><span class="dim" style="font-size:13px">${esc((R.types[x.type] || {}).name || '')} · ${esc((R.tiers[x.tier] || {}).name || '')}</span>${m ? `<span class="pill det">4.1 ${esc(m.name)}</span>` : ''}</div></div>
-  <div class="btnrow"><button class="btn" type="button" id="copy-no">複製編號</button>${ed ? '<button class="btn" type="button" id="i-edit">編輯事故</button>' : ''}${ed && !x.void ? (open ? '<button class="btn primary" type="button" id="close">結案</button>' : '<button class="btn" type="button" id="reopen">重新開啟</button>') : ''}</div></div>
+  <div class="btnrow"><button class="btn" type="button" id="copy-no">複製編號</button>${x.void ? '' : '<button class="btn" type="button" id="i-reply">回信範本</button>'}${ed ? '<button class="btn" type="button" id="i-edit">編輯事故</button>' : ''}${ed && !x.void ? (open ? '<button class="btn primary" type="button" id="close">結案</button>' : '<button class="btn" type="button" id="reopen">重新開啟</button>') : ''}</div></div>
   <dl class="facts"><div><dt>事故日期</dt><dd>${dfmt(x.date)}</dd></div><div><dt>船舶</dt><dd>${V ? `<a href="#vessels" class="vlink" data-v="${esc(String(x.imo || x.vessel))}">${esc(x.vessel)}</a>` : esc(x.vessel)} <span class="dim">IMO ${esc(x.imo || '—')}</span></dd></div><div><dt>公司碼 / 管理</dt><dd>${esc(x.company)} / ${esc(x.mgmt)}</dd></div><div><dt>地點</dt><dd>${esc(x.location || '—')}</dd></div><div><dt>TSL 責任單位</dt><dd>${esc(x.unit || '—')}</dd></div><div><dt>監管人員 PIC</dt><dd>${esc(x.pic || '—')}</dd></div>
   ${m || x.loss_usd || x.deaths || x.injuries ? `<div><dt>4.1 重大事件</dt><dd>${m ? esc(m.name) + '・' + (x.ert === 'Y' ? '應變小組已成立' : '應變小組未成立') + '（' + esc(x.ert_chair || m.ert_chair) + '）' : '未達'}</dd></div><div><dt>損失</dt><dd>${[x.loss_usd ? 'USD ' + fmt(x.loss_usd) : '', x.deaths ? '死亡 ' + x.deaths : '', x.injuries ? '受傷 ' + x.injuries : '', x.delay_h ? '延誤 ' + x.delay_h + ' 小時' : ''].filter(Boolean).join('・') || '—'}</dd></div>` : ''}
   <div><dt>來源</dt><dd>${x.source === 'MANUAL' ? '本系統新增' : '事故登錄器匯入'}</dd></div>${x.closed_date ? `<div><dt>結案日</dt><dd>${dfmt(x.closed_date)}</dd></div>` : ''}</dl>
   ${checksHTML(x)}${timelyHTML(x)}
   ${S.closing ? closeBoxHTML('結案前請確認已歸檔 RCA（Template 4）或結案確認（Template 5C），並在「編輯事故」勾選 6.6.4 結案確認四項。') : ''}
   <div class="note" style="white-space:pre-wrap">事故簡述：${esc(x.summary)}</div>${x.corrective_action ? `<div class="note" style="white-space:pre-wrap">矯正／預防措施：${esc(x.corrective_action)}</div>` : ''}
-  ${x.status === ST.CLOSED ? `<div class="note">6.6.4 結案確認：${CLOSE_ITEMS.map((t, i) => (cc[i] === 'Y' ? '✓ ' : '✗ ') + t).join('　')}</div>` : ''}${x.check_notes ? `<div class="note flag">檢核註記：${esc(x.check_notes)}</div>` : ''}</div>
+  ${x.status === ST.CLOSED ? `<div class="note">6.6.4 結案確認：${CLOSE_ITEMS.map((t, i) => (cc[i] === 'Y' ? '✓ ' : '✗ ') + t).join('　')}</div>` : ''}${x.check_notes ? `<div class="note flag">檢核註記：${esc(x.check_notes)}</div>` : ''}${x.reply_log ? `<div class="note"><b>回信紀錄</b>${String(x.reply_log).split('\n').map(l => `<div class="mono" style="font-size:12px">${esc(l)}</div>`).join('')}</div>` : ''}</div>
   <div class="card"><div class="section-head"><h2>文件歸檔（${x.docs.length}）</h2><span class="dim" style="font-size:12.5px">命名規則：${esc(base)}_[文件代碼]_[序號]；Drive：${esc(PSC.folderPath({ date: x.date, tracking_no: base, source: x.source }).join(' / '))}</span></div>
   ${ed ? uploadHTML(base, false) : ''}${docListHTML(x.docs, false)}</div>`;
   $('#back').addEventListener('click', () => { S.incId = null; S.closing = false; render(); });
   $('#copy-no').addEventListener('click', async () => { try { await navigator.clipboard.writeText(base); toast('已複製 ' + base); } catch (e) { toast(base); } });
   wireLinks(v);
   const eb = $('#i-edit'); if (eb) eb.addEventListener('click', () => editIncident(x));
+  const rb = $('#i-reply'); if (rb) rb.addEventListener('click', () => replyComposer(x));
   wireClose({ tracking_no: base }, base);
   wireUpload(base, x.docs, { tracking_no: base });
+}
+/* ---------- 回信範本：管理公司各階段通報後，套用範本快速回信 ---------- */
+const TPL_STAGE = { flash: '立即通報', initial: '初步報告', progress: '進度更新', rca: 'RCA', close: '結案', overdue: '逾期' };
+async function copyText(t, msg) {
+  try { await navigator.clipboard.writeText(t); }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch (_) {} ta.remove(); }
+  toast(msg || '已複製');
+}
+function replyComposer(x, code) {
+  const list = M.templates.filter(t => t.active !== 'N');
+  if (!list.length) { toast('沒有可用的回信範本，請到「事故規範 → 回信範本」新增'); return; }
+  const sug = PSC.replyStage(x, x.docs, today());
+  let cur = list.find(t => t.code === (code || sug)) || list[0], dirty = false;
+  const co = M.companies.find(c => c.code === x.company) || {};
+  const picFull = p => { p = String(p || '').trim(); if (!p) return ''; const hit = M.vessels.map(v => String(v.pic || '').trim()).find(v => v !== p && v.toLowerCase().endsWith(' ' + p.toLowerCase())); return hit || p; };
+  const st = { master: '', team: co.greeting || '', incident_en: '', pic: picFull(x.pic || (USER && USER.name)) };
+  const vars = () => PSC.replyVars(x, Object.assign({ rules: M.rules, company: co, docs: x.docs, today: today() }, st));
+  const tabs = () => list.map(t => `<button class="chip" type="button" data-tpl="${esc(t.code)}" aria-pressed="${t.code === cur.code}">${esc(t.name)}${t.code === sug ? ' <span class="tpl-sug">建議</span>' : ''}</button>`).join('');
+  const field = (id, label, val, ph) => `<div class="field"><label for="${id}">${label}</label><input class="inp" id="${id}" value="${esc(val)}" placeholder="${esc(ph || '')}"></div>`;
+  openModal({ title: '回信範本', sub: `${esc(x.tracking_no)}・${esc(x.vessel)}・${esc(x.company)}`,
+    html: `<div class="tpl-tabs" id="rc-tabs">${tabs()}</div>
+    <div class="form"><div class="frow">${field('rc-master', '船長姓名（稱謂用）', st.master, '例：Xu')}${field('rc-team', '管理公司稱謂', st.team, vars().greeting.replace(/^Master and /, ''))}${field('rc-pic', '署名（TSL PIC）', st.pic, 'Capt. Albert Yeh')}</div>
+    ${field('rc-inc', '事故英文名稱', st.incident_en, '例：Major Container Fire at Bay 38 (Undeclared Lithium-ion Batteries)')}
+    <div class="frow">${field('rc-to', '收件人 To', co.email_to || '', '管理公司信箱（可在系統管理設定）')}${field('rc-cc', '副本 Cc', co.email_cc || '', '')}</div>
+    <div class="field"><label for="rc-subj">主旨</label><input class="inp" id="rc-subj"></div>
+    <div class="field"><label for="rc-body">內文 <span class="dim" style="font-weight:400">（可直接修改；【】是要填寫的地方）</span></label><textarea class="inp tpl-body" id="rc-body" rows="20" spellcheck="false"></textarea></div>
+    <div id="rc-warn"></div></div>`,
+    foot: `<button class="btn ghost" type="button" id="rc-reset">重新套用範本</button><span style="flex:1"></span><button class="btn" type="button" id="rc-cs">複製主旨</button><button class="btn" type="button" id="rc-cb">複製內文</button><button class="btn" type="button" id="rc-mail">開啟郵件</button>${can('editor') ? '<button class="btn primary" type="button" id="rc-log">記錄已回覆</button>' : ''}`,
+    onMount(root, close) {
+      const $r = q => root.querySelector(q), subj = $r('#rc-subj'), body = $r('#rc-body');
+      const warn = () => { const p = PSC.pendingMarks(subj.value + '\n' + body.value); $r('#rc-warn').innerHTML = p.length ? `<div class="callout">還有 ${p.length} 處待填：${p.slice(0, 4).map(t => esc(t.length > 40 ? t.slice(0, 40) + '…' : t)).join('、')}${p.length > 4 ? '…' : ''}</div>` : '<div class="note" style="margin:0">✓ 沒有待填欄位</div>'; };
+      const apply = () => { const v = vars(); subj.value = PSC.fillTemplate(cur.subject, v); body.value = PSC.fillTemplate(cur.body, v); dirty = false; warn(); };
+      const wireTabs = () => $r('#rc-tabs').querySelectorAll('[data-tpl]').forEach(b => b.addEventListener('click', () => {
+        if (dirty && !confirm('內文已修改，切換範本會覆蓋修改的內容，要繼續嗎？')) return;
+        cur = list.find(t => t.code === b.dataset.tpl); $r('#rc-tabs').innerHTML = tabs(); wireTabs(); apply();
+      }));
+      wireTabs();
+      [['#rc-master', 'master'], ['#rc-team', 'team'], ['#rc-pic', 'pic'], ['#rc-inc', 'incident_en']].forEach(([id, k]) => $r(id).addEventListener('input', e => { st[k] = e.target.value.trim(); if (!dirty) apply(); else warn(); }));
+      [subj, body].forEach(el => el.addEventListener('input', () => { dirty = true; warn(); }));
+      $r('#rc-reset').addEventListener('click', () => { if (!dirty || confirm('用範本重新產生主旨與內文？目前的修改會被覆蓋。')) apply(); });
+      $r('#rc-cs').addEventListener('click', () => copyText(subj.value, '已複製主旨'));
+      $r('#rc-cb').addEventListener('click', () => copyText(body.value, '已複製內文，可直接貼到 Outlook'));
+      $r('#rc-mail').addEventListener('click', async () => {
+        const to = $r('#rc-to').value.trim(), cc = $r('#rc-cc').value.trim();
+        let url = `mailto:${encodeURIComponent(to).replace(/%40/g, '@').replace(/%2C/gi, ',')}?${cc ? 'cc=' + encodeURIComponent(cc) + '&' : ''}subject=${encodeURIComponent(subj.value)}`;
+        const withBody = url + '&body=' + encodeURIComponent(body.value.replace(/\n/g, '\r\n'));
+        if (withBody.length <= 1900) location.href = withBody;
+        else { await copyText(body.value, '內文較長，已先複製；郵件開啟後請在內文貼上'); location.href = url; }
+      });
+      const lb = $r('#rc-log'); if (lb) lb.addEventListener('click', () => run(async () => { await api('logReply', { tracking_no: x.tracking_no, code: cur.code, name: cur.name, subject: subj.value }); await close(); await reload(); toast('已記錄回信：' + cur.name); }, lb));
+      apply();
+    } });
+}
+function templatesCardHTML() {
+  const adm = can('admin');
+  return `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>回信範本</h2><p class="sub" style="margin:2px 0 0">事故頁的「回信範本」依事故進度建議範本，自動帶入編號、船名、分級、期限與管理公司稱謂。範本存在試算表「Templates」分頁（同代碼覆蓋預設範本），admin 可在這裡修改。</p></div>${adm ? '<button class="btn" type="button" id="tp-new">新增範本</button>' : ''}</div>
+  <div class="tbl-wrap"><table><thead><tr><th>回覆階段</th><th>名稱</th><th>主旨</th><th>狀態</th><th></th></tr></thead><tbody>${M.templates.map(t => `<tr><td>${esc(TPL_STAGE[t.stage] || t.stage || '—')}</td><td>${esc(t.name)}${t.builtin === 'N' ? ' <span class="dim">自訂</span>' : ''}</td><td class="mono" style="font-size:12px">${esc(t.subject)}</td><td>${t.active === 'N' ? '<span class="dim">停用</span>' : '啟用'}</td><td>${adm ? `<button class="btn sm" type="button" data-tp="${esc(t.code)}">修改</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+const TPL_VARS = ['greeting', 'tracking_no', 'vessel', 'incident', 'date', 'location', 'tier_en', 'type_en', 'company', 'pic', 'initial_h', 'initial_due', 'rca_d', 'rca_due', 'progress_txt', 'progress_txt_short', 'flash_at_txt', 'progress_at_txt', 'rca_at_txt', 'closed_date_txt', 'corrective_action', 'close_checks_txt', 'overdue_txt', 'retention_years'];
+function editTemplate(t) {
+  const isNew = !t; t = t || { code: '', stage: 'progress', name: '', subject: '[{{tracking_no}}] M/V {{vessel}} - ', body: 'Dear {{greeting}},\n\n', sort: '70', active: 'Y', note: '' };
+  openModal({ title: isNew ? '新增回信範本' : '修改回信範本', sub: isNew ? '' : `${esc(t.name)}（${esc(t.code)}）`,
+    html: `<div class="form"><div class="frow"><div class="field"><label for="tp-code">代碼</label><input class="inp mono" id="tp-code" data-k="code" value="${esc(t.code)}" ${isNew ? '' : 'readonly'} placeholder="例：survey"></div><div class="field"><label for="tp-name">名稱</label><input class="inp" id="tp-name" data-k="name" value="${esc(t.name)}"></div><div class="field"><label for="tp-stage">回覆階段</label><select id="tp-stage" data-k="stage">${Object.entries(TPL_STAGE).map(([k, l]) => opt(k, l, t.stage === k)).join('')}</select></div><div class="field"><label for="tp-sort">排序</label><input class="inp" id="tp-sort" data-k="sort" value="${esc(t.sort || '')}"></div><div class="field"><label for="tp-active">狀態</label><select id="tp-active" data-k="active">${opt('Y', '啟用', t.active !== 'N')}${opt('N', '停用', t.active === 'N')}</select></div></div>
+    <div class="field"><label for="tp-subj">主旨</label><input class="inp mono" id="tp-subj" data-k="subject" value="${esc(t.subject)}"></div>
+    <div class="field"><label for="tp-body">內文</label><textarea class="inp tpl-body" id="tp-body" data-k="body" rows="18" spellcheck="false">${esc(t.body)}</textarea><span class="hint">可用變數（點一下插入）：${TPL_VARS.map(k => `<button type="button" class="tpl-var" data-v="${k}">{{${k}}}</button>`).join(' ')}；【…】代表要人工填寫的地方，回信時會提醒。</span></div>
+    <div class="field"><label for="tp-note">備註</label><input class="inp" id="tp-note" data-k="note" value="${esc(t.note || '')}"></div><div id="tp-err" class="err"></div></div>`,
+    foot: `${!isNew && t.builtin === 'Y' ? '<button class="btn ghost" type="button" id="tp-default">還原預設內容</button><span style="flex:1"></span>' : ''}<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="tp-save">儲存</button>`,
+    onMount(root, close) {
+      root.querySelector('[data-close]').addEventListener('click', close);
+      const bodyEl = root.querySelector('#tp-body');
+      root.querySelectorAll('.tpl-var').forEach(b => b.addEventListener('click', () => { const a = bodyEl.selectionStart, z = bodyEl.selectionEnd, ins = '{{' + b.dataset.v + '}}'; bodyEl.value = bodyEl.value.slice(0, a) + ins + bodyEl.value.slice(z); bodyEl.focus(); bodyEl.selectionStart = bodyEl.selectionEnd = a + ins.length; }));
+      const dft = root.querySelector('#tp-default');
+      if (dft) dft.addEventListener('click', () => { const d = PSC.DEFAULT_TEMPLATES.find(x => x.code === t.code); if (!d) return; root.querySelectorAll('[data-k]').forEach(el => { if (d[el.dataset.k] !== undefined && el.dataset.k !== 'code') el.value = d[el.dataset.k]; }); toast('已還原預設內容，按「儲存」生效'); });
+      root.querySelector('#tp-save').addEventListener('click', () => {
+        const row = {}; root.querySelectorAll('[data-k]').forEach(el => { row[el.dataset.k] = el.value; });
+        row.code = row.code.trim();
+        if (!/^[\w-]+$/.test(row.code)) { root.querySelector('#tp-err').textContent = '代碼請用英數字（例如 survey）'; return; }
+        if (isNew && M.templates.some(x => x.code === row.code)) { root.querySelector('#tp-err').textContent = '代碼已存在'; return; }
+        run(async () => { await api('saveTemplate', row); await close(); await reload(); toast('已儲存範本：' + row.name); }, root.querySelector('#tp-save'));
+      });
+    } });
+}
+function editCompany(c) {
+  openModal({ title: '管理公司聯絡資訊', sub: `${esc(c.code)}・${esc(c.name)}`,
+    html: `<div class="form"><div class="field"><label for="ec-greet">回信稱謂</label><input class="inp" id="ec-greet" value="${esc(c.greeting || '')}" placeholder="例：V.Ships Management Team"><span class="hint">回信開頭為「Dear Capt. 船長 and 這裡的稱謂」</span></div>
+    <div class="field"><label for="ec-to">收件人 To</label><input class="inp" id="ec-to" value="${esc(c.email_to || '')}" placeholder="多個信箱以逗號分隔"></div><div class="field"><label for="ec-cc">副本 Cc</label><input class="inp" id="ec-cc" value="${esc(c.email_cc || '')}"></div></div>`,
+    foot: '<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="ec-save">儲存</button>',
+    onMount(root, close) {
+      root.querySelector('[data-close]').addEventListener('click', close);
+      root.querySelector('#ec-save').addEventListener('click', () => run(async () => { await api('saveCompany', Object.assign({}, c, { greeting: root.querySelector('#ec-greet').value.trim(), email_to: root.querySelector('#ec-to').value.trim(), email_cc: root.querySelector('#ec-cc').value.trim() })); await close(); await reload(); toast('已儲存 ' + c.code); }, root.querySelector('#ec-save')));
+    } });
 }
 /** 事故編輯（彈出視窗）：新增非 PSC 事故、或修改任何事故的所有欄位 */
 function editIncident(x) {
@@ -955,12 +1230,16 @@ function vIncRules(v) {
   <div class="tbl-wrap"><table><thead><tr><th>分級</th><th>判定標準</th><th class="n">立即通報</th><th class="n">初步報告</th><th>進度更新</th><th class="n">最終調查報告 RCA</th><th>條次</th><th></th></tr></thead><tbody>${['1', '2', '3'].filter(k => T[k]).map(k => { const r = T[k]; return `<tr><td style="white-space:nowrap">${tierPill(k)} ${esc(r.name)}<div class="dim" style="font-size:11.5px">${esc(r.name_en)}</div></td><td style="min-width:220px">${esc(r.criteria)}</td><td class="n">${esc(r.flash_h)} 小時</td><td class="n">${esc(r.initial_h)} 小時</td><td>${r.progress_d ? `每 ${esc(r.progress_d)} 天至少一次` : '依本公司要求'}</td><td class="n">${esc(r.rca_d)} 日</td><td class="dim" style="font-size:12px">${esc(r.ref)}</td><td>${editBtn(r)}</td></tr>`; }).join('')}</tbody></table></div></div>
   <div class="card" style="margin-bottom:16px"><h2>4.1 重大事件分級與緊急應變小組</h2><p class="sub">4.1 決定緊急應變小組的成立與主持層級；4.2 決定通報時限。達 4.1 重大事件者，通報分級不得低於對應級別（4.2.4.2）；未達者仍依第三級通報追蹤，但不成立應變小組（4.2.4.3）。數字門檻包含本數（7.2）。</p>
   <div class="tbl-wrap"><table><thead><tr><th>等級</th><th>主持</th><th>最低通報分級</th><th>數值門檻（系統提示用）</th><th>條件</th><th>條次</th><th></th></tr></thead><tbody>${Object.keys(MJ).sort().map(k => { const r = MJ[k]; return `<tr><td style="white-space:nowrap"><b>${esc(r.name)}</b></td><td>${esc(r.ert_chair)}</td><td>${tierPill(r.min_tier)}</td><td style="font-size:12.5px">${[r.loss_usd_min ? '海損 ≥ USD ' + fmt(r.loss_usd_min) : '', r.deaths_min ? '死亡 ≥ ' + r.deaths_min : '', r.delay_h_min ? '延誤 ≥ ' + r.delay_h_min + ' 小時' : '', r.injury_min ? '受傷 ≥ ' + r.injury_min : ''].filter(Boolean).join('<br>') || '—'}</td><td style="min-width:240px;font-size:12.5px">${esc(r.criteria)}</td><td class="dim" style="font-size:12px">${esc(r.ref)}</td><td>${editBtn(r)}</td></tr>`; }).join('') || '<tr><td colspan="7" class="empty">此版本沒有 4.1 分級</td></tr>'}</tbody></table></div></div>
+  ${incRiskCardHTML()}${templatesCardHTML()}
   <div class="grid g2"><div class="card"><h2>事故性質代碼（4.3）</h2><div class="tbl-wrap"><table class="ref"><tbody>${Object.entries(R.types).map(([k, r]) => `<tr><td class="mono">${esc(k)}</td><td>${esc(r.name)} <span class="dim">${esc(r.name_en)}</span><div class="dim" style="font-size:12px">${esc(r.criteria)}</div></td><td>${editBtn(r)}</td></tr>`).join('')}</tbody></table></div></div>
   <div class="card"><h2>參數</h2><div class="tbl-wrap"><table class="ref"><tbody>${Object.keys(R.params).map(code => M.rules.filter(x => x.kind === 'param' && x.code === code && x.active !== 'N' && x.valid_from <= at).sort((a, b) => a.valid_from < b.valid_from ? 1 : -1)[0]).filter(Boolean).map(r => `<tr><td>${esc(r.name)}<div class="dim" style="font-size:12px">${esc(r.ref)}</div></td><td class="mono">${esc(r.value)}</td><td>${editBtn(r)}</td></tr>`).join('')}</tbody></table></div>
   <h2 style="margin-top:16px">程序重點</h2><ul style="margin:6px 0 0;padding-left:18px;font-size:13px;display:grid;gap:4px"><li>6.4.2.5：通訊中斷等不可抗力，回復後立即通報並敘明原因與實際發生時間（事故頁勾選「不可抗力」）。</li><li>6.4.3：海技課確認收到通報後產生追蹤編號並回覆通報人；後續文件都要載明編號。</li><li>6.5：委外船舶依合約通報；本公司監管進度、RCA 品質與矯正措施有效性，不介入調查細節；時限達成率納入年度評比。</li><li>6.6.4：結案前確認調查完成、符合時限、符合 ISM、文件已歸檔，再以正式信文通知結案。</li><li>6.7：事故追蹤清冊、各階段報告與往來信文保存 ${esc(R.params.retention_years || 5)} 年。</li></ul></div></div>`;
   $('#rd').addEventListener('change', e => { S.ruleDate = e.target.value || ''; render(); });
   v.querySelectorAll('[data-rule]').forEach(b => b.addEventListener('click', () => editRule(M.rules.find(r => PSC.ruleKey(r) === b.dataset.rule))));
   const nb = $('#r-new'); if (nb) nb.addEventListener('click', newRuleSetModal);
+  v.querySelectorAll('[data-tp]').forEach(b => b.addEventListener('click', () => editTemplate(M.templates.find(t => t.code === b.dataset.tp))));
+  const tn = $('#tp-new'); if (tn) tn.addEventListener('click', () => editTemplate(null));
+  const ire = $('#ir-edit'); if (ire) ire.addEventListener('click', editIncRisk);
 }
 function editRule(r) {
   if (!r) return;
@@ -1030,7 +1309,7 @@ function vAdmin(v) {
   <div class="btnrow"><button class="btn primary" type="button" id="tm-save">儲存</button></div></div></div>
   <div class="grid g2" style="margin-bottom:16px"><div class="card"><div class="section-head"><h2>資料檢核</h2><button class="btn" type="button" id="dc-run">執行檢核</button></div><p class="sub">組員直接編輯 Google 試算表後，用這裡檢查編號重複、找不到對應、格式錯誤等問題。試算表選單「TSL PSC → 檢核資料」結果相同。</p><div id="dc-out"></div></div>
   <div class="card"><h2>匯入船舶主檔 / NK 資料</h2><p class="sub">選擇船隊監控系統的 <span class="mono">fleet-data.js</span>（整個船隊一次匯入），或貼上 SHIP JSON。依 IMO 對應，更新船級、GT / DWT、TEU、登記船東等欄位與 NK 檢驗 / 證書到期。</p><div class="form"><input class="inp" type="file" id="nk-file" accept=".js,.json,application/json,text/javascript"><textarea class="inp mono" id="nk-text" rows="3" placeholder='{"vessel_master": {"imo_number": "9967512", ...}, "certificates": [...], "surveys": [...]}'></textarea><div class="field"><label for="nk-mode">寫入方式</label><select id="nk-mode"><option value="class">船級欄位以 Class 資料為準，其餘只補空白（建議）</option><option value="fill">只補空白欄位，不同值列出來確認</option><option value="overwrite">全部以主檔覆蓋</option></select></div><div class="btnrow"><button class="btn primary" type="button" id="nk-go">匯入</button><span class="dim" id="nk-info" style="font-size:12.5px"></span></div></div>
-  <h2 style="margin-top:14px">管理公司（Tokyo MOU 績效）</h2><div class="tbl-wrap"><table><thead><tr><th>公司碼</th><th>名稱</th><th>DOC 公司 IMO</th><th>績效</th><th>日期</th><th>備註</th></tr></thead><tbody>${M.companies.map(c => `<tr><td class="mono">${esc(c.code)}</td><td>${esc(c.name)}</td><td class="mono">${esc(c.doc_imo)}</td><td>${esc(c.tmou_performance)}</td><td class="num">${dfmt(c.perf_as_of)}</td><td class="dim" style="font-size:12px">${esc(c.note)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚未匯入</td></tr>'}</tbody></table></div></div></div>
+  <h2 style="margin-top:14px">管理公司（Tokyo MOU 績效）</h2><div class="tbl-wrap"><table><thead><tr><th>公司碼</th><th>名稱</th><th>DOC 公司 IMO</th><th>績效</th><th>日期</th><th>回信稱謂 / 收件人</th></tr></thead><tbody>${M.companies.map(c => `<tr class="click" data-co="${esc(c.code)}" title="${esc(c.note || '')}"><td class="mono">${esc(c.code)}</td><td>${esc(c.name)}</td><td class="mono">${esc(c.doc_imo)}</td><td>${esc(c.tmou_performance)}</td><td class="num">${dfmt(c.perf_as_of)}</td><td style="font-size:12px">${c.greeting || c.email_to ? `${esc(c.greeting || '')}<div class="dim">${esc(c.email_to || '')}</div>` : '<span class="dim">點一下設定</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚未匯入</td></tr>'}</tbody></table></div></div></div>
   <div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>MOU 對照表（港口國 → 檢查區域）</h2><p class="sub" style="margin:2px 0 0">新登錄的 PSC 檢查依港口國（與港口）自動帶入 MOU；有填港口的列優先。只有 MOU = Tokyo MOU 的檢查會重算 Tokyo MOU 窗口。Google 試算表的「MOUMap」分頁也可以直接編輯。</p></div><div class="btnrow"><button class="btn" type="button" id="m-new">新增一列</button><button class="btn" type="button" id="m-apply">補標空白的檢查</button><button class="btn" type="button" id="m-apply-all">全部依對照表重新套用</button></div></div>
   ${MM ? `<div class="drop" style="margin-bottom:10px"><div class="frow"><div class="field"><label for="mm-country">港口國</label><input class="inp" id="mm-country" value="${esc(MM.country || '')}" placeholder="UAE"></div><div class="field"><label for="mm-port">港口（選填）</label><input class="inp" id="mm-port" value="${esc(MM.port || '')}" placeholder="空白 = 全國"></div><div class="field"><label for="mm-mou">MOU 區域</label><select id="mm-mou">${PSC.MOU_NAMES.map(m => opt(m, m, MM.mou === m)).join('')}</select></div><div class="field"><label for="mm-also">也是哪些 MOU 成員</label><input class="inp" id="mm-also" value="${esc(MM.also || '')}" placeholder="例如 Indian Ocean MOU"></div></div><div class="field"><label for="mm-note">備註</label><input class="inp" id="mm-note" value="${esc(MM.note || '')}"></div><div class="btnrow"><button class="btn primary" type="button" id="mm-save">儲存</button>${MM._key ? '<button class="btn danger" type="button" id="mm-del">刪除這一列</button>' : ''}<button class="btn ghost" type="button" id="mm-cancel">取消</button></div></div>` : ''}
   <div class="tbl-wrap" style="max-height:420px"><table><thead><tr><th>港口國</th><th>港口</th><th>MOU 區域</th><th>也是成員</th><th class="n">檢查次數</th><th>備註</th></tr></thead><tbody>${M.mouMap.slice().sort((a, b) => { const ua = [...mouUse].filter(([k]) => k.split('|')[0] === a.country).reduce((m, [, n]) => m + n, 0), ub = [...mouUse].filter(([k]) => k.split('|')[0] === b.country).reduce((m, [, n]) => m + n, 0); return ub - ua || (a.country < b.country ? -1 : 1) || (a.port < b.port ? -1 : 1); }).map(r => { const used = [...mouUse].filter(([k]) => k.split('|')[0] === r.country).reduce((m, [, n]) => m + n, 0); return `<tr class="click" data-mm="${esc(r.country + '|' + (r.port || ''))}"><td>${esc(r.country)}</td><td>${esc(r.port || '（全國）')}</td><td>${mouTag(r.mou)}</td><td class="dim">${esc(r.also || '')}</td><td class="n">${r.port ? '' : used || '–'}</td><td class="dim" style="font-size:12px">${esc(r.note || '')}</td></tr>`; }).join('')}</tbody></table></div></div>
@@ -1052,6 +1331,7 @@ function vAdmin(v) {
     catch (err) { nkShips = null; $('#nk-info').textContent = ''; toast('無法讀取：' + err.message, 7000); }
   });
   $('#nk-text').addEventListener('input', () => { nkShips = null; $('#nk-info').textContent = ''; });
+  v.querySelectorAll('[data-co]').forEach(tr => tr.addEventListener('click', () => editCompany(M.companies.find(c => c.code === tr.dataset.co))));
   $('#nk-go').addEventListener('click', () => {
     let ships = nkShips;
     if (!ships) { try { ships = nkParse($('#nk-text').value); } catch (e) { toast('格式不正確：' + e.message); return; } }
@@ -1379,12 +1659,12 @@ function renderNav() {
   $('#tabs').innerHTML = tabs.map(([k, l]) => `<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${k === S.tab}">${l}</button>`).join('');
   $('#tabs').querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { clearDetail(); S.page = 0; setTab(b.dataset.tab); }));
 }
-function clearDetail() { S.caseId = null; S.caseMode = null; S.incId = null; S.closing = false; }
+function clearDetail() { S.caseId = null; S.caseMode = null; S.incId = null; S.closing = false; S.incVessel = null; }
 let lastKey = '', renderTok = 0;
 function render() {
   if (!M) return;
   hideTip();
-  const key = [S.tab, S.caseId, S.caseMode, S.incId, S.profile].join('|'), v = $('#view');
+  const key = [S.tab, S.caseId, S.caseMode, S.incId, S.profile, S.incVessel].join('|'), v = $('#view');
   if (key !== lastKey && lastKey && v.children.length && !REDUCED) {
     const tok = ++renderTok; lastKey = key;
     fxOut(v).then(() => { if (tok === renderTok) { doRender(); fxIn(v, true); } });
@@ -1395,12 +1675,12 @@ function render() {
 }
 function doRender() {
   const detail = S.caseMode || S.caseId || S.incId;
-  $('#filters').hidden = S.tab === 'admin' || S.tab === 'inc-rules' || ((S.tab === 'inspections' || S.tab === 'incidents') && detail);
-  const VIS = { window: ['#f-mgmt', '#f-vessel'], bribe: ['#f-years', '#f-mgmt', '#f-vessel', '#f-mou', '#f-country'], incidents: ['#f-years', '#f-mgmt', '#f-vessel', '#f-q'], 'inc-overview': ['#f-years', '#f-mgmt', '#f-vessel', '#f-q'], map: ['#f-years', '#f-mgmt', '#f-vessel', '#f-mou', '#f-cat', '#f-q'] }[S.tab];
+  $('#filters').hidden = S.tab === 'admin' || S.tab === 'inc-rules' || (S.tab === 'inc-vessels' && !!S.incVessel) || ((S.tab === 'inspections' || S.tab === 'incidents') && detail);
+  const VIS = { window: ['#f-mgmt', '#f-vessel'], bribe: ['#f-years', '#f-mgmt', '#f-vessel', '#f-mou', '#f-country'], incidents: ['#f-years', '#f-mgmt', '#f-vessel', '#f-q'], 'inc-vessels': ['#f-years', '#f-mgmt', '#f-vessel', '#f-q'], 'inc-overview': ['#f-years', '#f-mgmt', '#f-vessel', '#f-q'], map: ['#f-years', '#f-mgmt', '#f-vessel', '#f-mou', '#f-cat', '#f-q'] }[S.tab];
   ['#f-years', '#f-mgmt', '#f-vessel', '#f-mou', '#f-country', '#f-cat', '#f-q'].forEach(sel => { $(sel).hidden = !!VIS && !VIS.includes(sel); });
   syncFilterUI();
   const v = $('#view');
-  ({ 'inc-overview': vIncOverview, incidents: vIncidents, 'inc-rules': vIncRules, map: vMap, overview: vOverview, inspections: vInspections, records: vRecords, vessels: vVessels, codes: vCodes, window: vWindow, bribe: vBribe, admin: vAdmin }[S.tab] || vIncOverview)(v);
+  ({ 'inc-overview': vIncOverview, 'inc-vessels': vIncVessels, incidents: vIncidents, 'inc-rules': vIncRules, map: vMap, overview: vOverview, inspections: vInspections, records: vRecords, vessels: vVessels, codes: vCodes, window: vWindow, bribe: vBribe, admin: vAdmin }[S.tab] || vIncOverview)(v);
 }
 function header() {
   $('#m-asof').textContent = dfmt(M.asof);
