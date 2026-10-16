@@ -419,7 +419,7 @@ const VS = PSC.VSTATUS;
 const VS_CLS = { [VS.OPEN]: 'open', [VS.SUBMITTED]: 'sub', [VS.CLOSED]: 'closed', [VS.CANCELLED]: 'hist' };
 const vsPill = it => { const st = it.st || PSC.visitItemState(it, today()); return st.overdue ? `<span class="stp stp-over">逾期 ${-st.daysLeft} 天</span>` : `<span class="stp stp-${VS_CLS[st.status] || 'open'}">${esc(st.status)}</span>`; };
 const partyTag = p => `<span class="ptag ptag-${esc(String(p || 'OTH').toLowerCase())}" title="${esc(PSC.VISIT_PARTY[p] || p)}">${esc(p || '—')}</span>`;
-const dueTxt = it => { const st = it.st; if (!it.due_date) return '<span class="dim">—</span>'; return `<span class="num">${dfmt(it.due_date)}</span>${st && st.active && st.daysLeft !== null ? `<div class="${st.daysLeft < 0 && st.status === VS.OPEN ? 'flag' : 'dim'}" style="font-size:11.5px">${st.daysLeft < 0 ? '已過 ' + (-st.daysLeft) + ' 天' : st.daysLeft === 0 ? '今天到期' : '剩 ' + st.daysLeft + ' 天'}</div>` : ''}`; };
+const dueTxt = it => { const st = it.st; if (!it.due_date) return '<span class="dim">—</span>'; if (st && st.status === VS.SUBMITTED && it.submitted_at) return `<span class="num">${dfmt(it.due_date)}</span><div class="${st.ontime === false ? 'flag' : 'dim'}" style="font-size:11.5px">${dfmt(it.submitted_at)} 提交${st.ontime === false ? '（逾期）' : ''}</div>`; return `<span class="num">${dfmt(it.due_date)}</span>${st && st.active && st.daysLeft !== null ? `<div class="${st.daysLeft < 0 && st.status === VS.OPEN ? 'flag' : 'dim'}" style="font-size:11.5px">${st.daysLeft < 0 ? '已過 ' + (-st.daysLeft) + ' 天' : st.daysLeft === 0 ? '今天到期' : '剩 ' + st.daysLeft + ' 天'}</div>` : ''}`; };
 const coLabel = code => ({ FLEET: 'FML', VSHIPS: 'V.Ships', BSM: 'BSM', TSL: 'T.S. Lines', TEH: 'Teh Shipping' })[code] || code || '—';
 function vfBar(stats) { const t = stats.total || 0, w = n => t ? (n / t * 100).toFixed(1) : 0; return `<div class="vfbar" title="已關閉 ${stats.closed}・待確認 ${stats.submitted}・待改善 ${stats.open}"><i class="c" style="width:${w(stats.closed)}%"></i><i class="s" style="width:${w(stats.submitted)}%"></i><i class="o" style="width:${w(stats.open)}%"></i></div>`; }
 function vfStatsLine(st) { return `<span><b class="num">${st.total}</b> 項</span><span>已關閉 <b class="num">${st.closed}</b></span>${st.submitted ? `<span>待確認 <b class="num">${st.submitted}</b></span>` : ''}${st.open ? `<span>待改善 <b class="num">${st.open}</b></span>` : ''}${st.overdue ? `<span class="flag">逾期 ${st.overdue}</span>` : ''}`; }
@@ -461,7 +461,7 @@ function vVisits(v) {
 function visitItemsTable(items, opts) {
   opts = opts || {};
   const ed = can('editor');
-  return `<div class="tbl-wrap"><table class="vf-t"><thead><tr>${ed ? '<th style="width:28px"><input type="checkbox" id="vi-all" aria-label="全選"></th>' : ''}${opts.visit ? '<th>訪船</th>' : ''}<th>編號</th><th>項目</th><th>缺失說明</th><th>矯正要求</th><th>期限</th><th>狀態</th><th>矯正措施</th></tr></thead><tbody>${items.map(it => `<tr class="click${it.st.status === VS.CANCELLED ? ' dim' : ''}" data-vi="${esc(it.item_id)}">${ed ? `<td data-nc><input type="checkbox" class="vi-ck" value="${esc(it.item_id)}" ${it.st.status === VS.CLOSED || it.st.status === VS.CANCELLED ? 'disabled' : ''}></td>` : ''}${opts.visit ? `<td>${esc(it.v ? it.v.vessel : '')}<div class="dim mono" style="font-size:11px">${esc(it.visit_no)}</div></td>` : ''}<td class="mono" style="font-size:12px">${esc(it.ref || '#' + it.seq)}</td><td style="font-size:12.5px">${esc(it.area)}<div class="dim" style="font-size:11px">${esc(it.section)}</div></td><td class="vf-txt">${esc(it.finding)}</td><td class="vf-txt">${esc(it.action_required)}</td><td>${dueTxt(it)}</td><td>${vsPill(it)}</td><td class="vf-txt dim">${esc(it.corrective_action)}</td></tr>`).join('') || `<tr><td colspan="9" class="empty">沒有缺失</td></tr>`}</tbody></table></div>`;
+  return `<div class="tbl-wrap"><table class="vf-t"><thead><tr>${ed ? '<th style="width:28px"><input type="checkbox" id="vi-all" aria-label="全選"></th>' : ''}${opts.visit ? '<th>訪船</th>' : ''}<th>編號</th><th>項目</th><th>缺失說明</th><th>矯正要求</th><th>期限</th><th>狀態</th><th>矯正措施</th></tr></thead><tbody>${items.map(it => `<tr class="click${it.st.status === VS.CANCELLED ? ' dim' : ''}" data-vi="${esc(it.item_id)}">${ed ? `<td data-nc><input type="checkbox" class="vi-ck" value="${esc(it.item_id)}" ${it.st.status === VS.CLOSED || it.st.status === VS.CANCELLED ? 'disabled' : ''}></td>` : ''}${opts.visit ? `<td>${esc(it.v ? it.v.vessel : '')}<div class="dim mono" style="font-size:11px">${esc(it.visit_no)}</div></td>` : ''}<td class="mono" style="font-size:12px">${esc(it.ref || '#' + it.seq)}</td><td style="font-size:12.5px">${ftypePill(it.ftype)}${esc(it.area)}<div class="dim" style="font-size:11px">${esc(it.section)}</div></td><td class="vf-txt">${esc(it.finding)}</td><td class="vf-txt">${esc(it.action_required)}</td><td>${dueTxt(it)}</td><td>${vsPill(it)}</td><td class="vf-txt dim">${esc(it.corrective_action)}</td></tr>`).join('') || `<tr><td colspan="9" class="empty">沒有缺失</td></tr>`}</tbody></table></div>`;
 }
 function wireItemsTable(root) {
   root.querySelectorAll('tr[data-vi]').forEach(tr => tr.addEventListener('click', e => { if (e.target.closest('[data-nc]')) return; visitItemModal(tr.dataset.vi); }));
@@ -541,6 +541,100 @@ function importItemsModal(x, single) {
       });
     } });
 }
+/* ---------- PDF 照片壓縮（瀏覽器端）：只重新壓縮 PDF 內的照片，文字與向量內容不動 ---------- */
+const PDFLIB_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
+let pdfLibP = null;
+function loadPdfLib() {
+  if (window.PDFLib) return Promise.resolve(window.PDFLib);
+  return pdfLibP || (pdfLibP = new Promise((res, rej) => {
+    const sc = document.createElement('script'); sc.src = PDFLIB_URL;
+    sc.onload = () => window.PDFLib ? res(window.PDFLib) : (pdfLibP = null, rej(new Error('PDF 壓縮元件載入失敗')));
+    sc.onerror = () => { pdfLibP = null; rej(new Error('無法載入 PDF 壓縮元件，請確認網路可連到 cdnjs.cloudflare.com')); };
+    document.head.appendChild(sc);
+  }));
+}
+/** 壓縮等級：依序嘗試，直到小於目標大小 */
+const PDF_SHRINK_LEVELS = [{ max: 1600, q: 0.72 }, { max: 1280, q: 0.62 }, { max: 1024, q: 0.55 }, { max: 800, q: 0.5 }];
+async function shrinkPdf(src, targetBytes, onProg) {
+  const L = await loadPdfLib(), { PDFDocument, PDFName, PDFRawStream, PDFNumber, PDFArray, PDFDict, PDFRef, decodePDFRawStream } = L;
+  const bytes = src instanceof Uint8Array ? src : new Uint8Array(await src.arrayBuffer());
+  const num = v => v instanceof PDFNumber ? v.asNumber() : (v && v.asNumber ? v.asNumber() : null);
+  let best = null;
+  for (let li = 0; li < PDF_SHRINK_LEVELS.length; li++) {
+    const lv = PDF_SHRINK_LEVELS[li];
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false }), ctx = doc.context;
+    const res = (o) => o instanceof PDFRef ? ctx.lookup(o) : o;
+    const imgs = [];
+    for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+      if (!(obj instanceof PDFRawStream)) continue;
+      const d = obj.dict; if (d.get(PDFName.of('Subtype')) !== PDFName.of('Image')) continue;
+      if (obj.contents.length < 40000) continue; // 小圖（標誌、圖示）不動
+      let f = res(d.get(PDFName.of('Filter'))); if (f instanceof PDFArray) f = f.size() === 1 ? res(f.get(0)) : null;
+      const fname = f ? f.toString() : '';
+      if (d.get(PDFName.of('ImageMask')) || d.get(PDFName.of('Mask'))) continue;
+      let cs = res(d.get(PDFName.of('ColorSpace'))), comps = 0;
+      if (cs === PDFName.of('DeviceRGB')) comps = 3; else if (cs === PDFName.of('DeviceGray')) comps = 1;
+      else if (cs instanceof PDFArray && res(cs.get(0)) === PDFName.of('ICCBased')) { const icc = res(cs.get(1)); const n = icc && icc.dict ? num(res(icc.dict.get(PDFName.of('N')))) : null; if (n === 3 || n === 1) comps = n; }
+      if (!comps) continue; // CMYK、Indexed 等不動
+      if (fname === '/DCTDecode') imgs.push({ ref, obj, kind: 'jpeg', comps });
+      else if (fname === '/FlateDecode' && num(res(d.get(PDFName.of('BitsPerComponent')))) === 8) imgs.push({ ref, obj, kind: 'flate', comps });
+    }
+    let done = 0;
+    for (const im of imgs) {
+      const d = im.obj.dict, w = num(res(d.get(PDFName.of('Width')))), h = num(res(d.get(PDFName.of('Height'))));
+      try {
+        let bmp;
+        if (im.kind === 'jpeg') bmp = await createImageBitmap(new Blob([im.obj.contents], { type: 'image/jpeg' }));
+        else {
+          const raw = decodePDFRawStream(im.obj).decode(); if (raw.length < w * h * im.comps) continue;
+          const id = new ImageData(w, h), px = id.data;
+          for (let i = 0, j = 0; i < w * h; i++, j += im.comps) { if (im.comps === 3) { px[i * 4] = raw[j]; px[i * 4 + 1] = raw[j + 1]; px[i * 4 + 2] = raw[j + 2]; } else { px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = raw[j]; } px[i * 4 + 3] = 255; }
+          bmp = await createImageBitmap(id);
+        }
+        const k = Math.min(1, lv.max / Math.max(bmp.width, bmp.height)), nw = Math.max(1, Math.round(bmp.width * k)), nh = Math.max(1, Math.round(bmp.height * k));
+        const cv = document.createElement('canvas'); cv.width = nw; cv.height = nh;
+        const g = cv.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, nw, nh); g.drawImage(bmp, 0, 0, nw, nh); bmp.close && bmp.close();
+        const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', lv.q));
+        const out = new Uint8Array(await blob.arrayBuffer());
+        if (out.length < im.obj.contents.length * 0.9) {
+          const nd = d.clone(ctx);
+          nd.set(PDFName.of('Filter'), PDFName.of('DCTDecode')); nd.set(PDFName.of('Width'), PDFNumber.of(nw)); nd.set(PDFName.of('Height'), PDFNumber.of(nh));
+          nd.set(PDFName.of('BitsPerComponent'), PDFNumber.of(8)); nd.set(PDFName.of('ColorSpace'), PDFName.of('DeviceRGB'));
+          nd.delete(PDFName.of('DecodeParms')); nd.delete(PDFName.of('Decode'));
+          ctx.assign(im.ref, PDFRawStream.of(nd, out));
+        }
+      } catch (e) { /* 這張圖解不開就保留原樣 */ }
+      done++; if (onProg) onProg(li, done, imgs.length);
+    }
+    const saved = await doc.save({ useObjectStreams: true });
+    best = { bytes: saved, level: li, images: imgs.length, max: lv.max, q: lv.q };
+    if (saved.length <= targetBytes) break;
+  }
+  return best;
+}
+const MB = n => (n / 1048576).toFixed(1) + ' MB';
+const SHRINK_TARGET = Math.floor(MAX_MB * 0.97 * 1048576); // 留一點餘裕給上傳
+/** 上傳前處理：超過 MAX_MB 的 PDF 壓縮照片、圖片縮小；回傳可上傳的 Blob */
+async function fitUpload(file, onProg) {
+  if (file.size <= MAX_MB * 1048576) return { blob: file, size: file.size, shrunk: false };
+  const isPdf = /pdf$/i.test(file.type) || /\.pdf$/i.test(file.name), isImg = /^image\/(jpeg|png|webp)$/i.test(file.type);
+  if (isPdf) {
+    const r = await shrinkPdf(file, SHRINK_TARGET, (lv, i, n) => onProg && onProg(`壓縮照片（第 ${lv + 1} 級）${i} / ${n}`));
+    if (r.bytes.length > MAX_MB * 1048576) throw new Error(`${file.name} 壓縮後仍有 ${MB(r.bytes.length)}，超過 ${MAX_MB} MB；請把附件拆成兩份再上傳`);
+    return { blob: new Blob([r.bytes], { type: 'application/pdf' }), size: r.bytes.length, shrunk: true, from: file.size, level: r.level, max: r.max };
+  }
+  if (isImg) {
+    const bmp = await createImageBitmap(file);
+    for (const [mx, q] of [[2400, 0.82], [1800, 0.75], [1400, 0.7]]) {
+      const k = Math.min(1, mx / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+      cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+      const b = await new Promise(r => cv.toBlob(r, 'image/jpeg', q));
+      if (b.size <= MAX_MB * 1048576) return { blob: b, size: b.size, shrunk: true, from: file.size, max: mx };
+    }
+  }
+  throw new Error(`${file.name} 有 ${MB(file.size)}，超過 ${MAX_MB} MB${isPdf || isImg ? '' : '（只有 PDF 與照片可自動壓縮）'}`);
+}
+const shrinkNote = u => u.shrunk ? `（原檔 ${MB(u.from)}，照片已壓縮為 ${MB(u.size)}）` : '';
 /* ---------- v1.8 VIR 報告 PDF 自動匯入與缺失數比對 ---------- */
 const PDFJS_V = '3.11.174', PDFJS_CDN = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_V}/`;
 let pdfjsP = null;
@@ -571,7 +665,34 @@ function visitNoFromName(name) { const m = String(name || '').toUpperCase().matc
 function shipByName(n) { const k = String(n || '').toUpperCase().replace(/\s+/g, ' ').trim(); return k ? PSC.currentVessels(M.vessels, today()).find(s2 => s2.vessel.toUpperCase() === k) : null; }
 
 /** 比對表：報告摘要 vs DEFECT SUMMARY 擷取 vs 內文評分題目 vs 系統已登錄 */
+const FTYPE_CLS = t => /defic|non.?conform/i.test(t || '') ? 'ft-d' : 'ft-o';
+const ftypePill = t => t ? `<span class="ftype ${FTYPE_CLS(t)}">${esc(t)}</span>` : '';
+/** V.Ships Shipsure：沒有封面缺失數，以連號、重複、Actions 表交叉檢查 */
+function shipsureReconHTML(job) {
+  const r = job.parse, sm = r.summary, have = M.vitems.filter(it => it.visit_no === job.visitNo && it.st.status !== VS.CANCELLED);
+  const types = Object.keys(sm.byType || {}), secs = Object.keys(sm.categories);
+  const cnt = (sec, t) => r.defects.filter(d => d.section === sec && (!t || d.ftype === t)).length;
+  const haveN = sec => have.filter(it => secKey(it.section) === secKey(sec)).length;
+  return `<div class="tbl-wrap"><table class="vr-t"><thead><tr><th>System / Area</th>${types.map(t => `<th class="n">${esc(t)}</th>`).join('')}<th class="n">合計</th><th class="n">報告已清除</th><th class="n">系統已登錄</th></tr></thead><tbody>${secs.map(sec => `<tr><td>${esc(sec)}</td>${types.map(t => `<td class="n">${cnt(sec, t) || '·'}</td>`).join('')}<td class="n">${cnt(sec)}</td><td class="n">${r.defects.filter(d => d.section === sec && d.cleared_date).length}</td><td class="n">${haveN(sec)}</td></tr>`).join('')}
+  <tr class="vr-sum"><td>合計</td>${types.map(t => `<td class="n">${sm.byType[t]}</td>`).join('')}<td class="n">${r.defects.length}</td><td class="n">${sm.cleared}</td><td class="n">${have.length}</td></tr></tbody></table></div>
+  <ul class="vr-checks">${r.checks.map(c => `<li class="${c.ok ? 'ok' : 'ng'}">${c.ok ? '✓' : '✗'} ${esc(c.label)}${c.detail ? `：<span class="mono">${esc(c.detail)}</span>` : ''}</li>`).join('')}</ul>
+  <p class="note" style="margin:6px 0 0">V.Ships（Shipsure）報告沒有封面缺失總數，改以 Insp. Ref. 是否連號、編號是否重複、Actions 表是否對得上來確認沒有漏讀。報告上已有 Cleared 日期的項目匯入後為「待確認」，由 PIC 確認關閉。</p>`;
+}
+/** BSM：附錄缺失單 vs 主文評為 No／Fair／Poor 的題目 */
+function bsmReconHTML(job) {
+  const r = job.parse, sm = r.summary, have = M.vitems.filter(it => it.visit_no === job.visitNo && it.st.status !== VS.CANCELLED);
+  const neg = r.reconcile.reduce((a, x) => a + x.negative, 0), lst = r.reconcile.reduce((a, x) => a + x.listed, 0);
+  const subs = Object.keys(sm.categories);
+  return `<div class="grid g2" style="gap:12px"><div class="tbl-wrap"><table class="vr-t"><thead><tr><th>主文章節</th><th class="n">題數</th><th class="n">評為 No／Fair／Poor</th><th class="n">列入附錄缺失</th><th></th></tr></thead><tbody>${r.reconcile.map(x => `<tr><td>${esc(x.section)}</td><td class="n">${x.questions}</td><td class="n">${x.negative || '·'}</td><td class="n">${x.listed || '·'}</td><td>${x.negative === x.listed ? '<span class="vr-ok">✓</span>' : '<span class="vr-ng">✗</span>'}</td></tr>`).join('')}
+  <tr class="vr-sum"><td>合計</td><td class="n">${sm.tasks}</td><td class="n">${neg}</td><td class="n">${lst}</td><td>${neg === lst ? '<span class="vr-ok">✓</span>' : '<span class="vr-ng">✗</span>'}</td></tr></tbody></table></div>
+  <div class="tbl-wrap"><table class="vr-t"><thead><tr><th>附錄 SubCategory</th><th class="n">缺失</th><th class="n">系統已登錄</th></tr></thead><tbody>${subs.map(k => `<tr><td>${esc(k)}</td><td class="n">${sm.categories[k]}</td><td class="n">${have.filter(it => secKey(it.section) === secKey(k)).length}</td></tr>`).join('')}<tr class="vr-sum"><td>合計</td><td class="n">${r.defects.length}</td><td class="n">${have.length}</td></tr></tbody></table></div></div>
+  <ul class="vr-checks">${r.checks.map(c => `<li class="${c.ok ? 'ok' : 'ng'}">${c.ok ? '✓' : '✗'} ${esc(c.label)}${c.detail ? `：<span class="mono">${esc(c.detail)}</span>` : ''}</li>`).join('')}${sm.unanswered && sm.unanswered.length ? `<li class="ng">✗ 主文有 ${sm.unanswered.length} 題讀不到評語：${esc(sm.unanswered.slice(0, 8).join('、'))}</li>` : ''}</ul>
+  <p class="note" style="margin:6px 0 0">BSM 報告的缺失列在附錄「SUPERINTENDENT VESSEL INSPECTION」缺失單（匯入以此為準）；主文 ${sm.tasks} 題中評為 No／Fair／Poor 的題目應該都列入附錄，用來確認沒有漏列。直接原因與根本原因寫在缺失說明下方，負責職位寫在矯正要求。</p>
+  ${r.onlyInDetail.length ? `<div class="callout" style="margin:8px 0 0">主文評為負面、但附錄沒列：${r.onlyInDetail.map(b => esc(b.section + ' 第 ' + b.body_no + ' 題（' + b.answer + '）')).join('、')}。這幾項不會自動匯入，請向船管確認。</div>` : ''}`;
+}
 function virReconHTML(job) {
+  if (job.parse.format === 'SHIPSURE') return shipsureReconHTML(job);
+  if (job.parse.format === 'BSM') return bsmReconHTML(job);
   const r = job.parse, have = M.vitems.filter(it => it.visit_no === job.visitNo && it.st.status !== VS.CANCELLED);
   const rows = r.reconcile.map(x => ({ section: x.section, report: x.report, found: x.found }));
   const cnt = (arr, k) => arr.filter(it => secKey(it.section) === k).length;
@@ -583,15 +704,19 @@ function virReconHTML(job) {
   ${r.onlyInDetail.length ? `<div class="callout" style="margin:8px 0 0">內文評分有缺失、但 DEFECT SUMMARY 沒列：${r.onlyInDetail.map(d => esc(d.ref + ' ' + (d.area || ''))).join('、')}。這幾項不會自動匯入，請向船管確認。</div>` : ''}`;
 }
 function virItemsHTML(job) {
-  const haveRef = new Set(M.vitems.filter(it => it.visit_no === job.visitNo).map(it => String(it.ref || '').trim()));
-  return `<div class="tbl-wrap" style="max-height:320px"><table class="vf-t"><thead><tr><th></th><th>編號</th><th>項目／題目</th><th>缺失說明</th><th>矯正要求</th><th>期限</th><th>代碼</th></tr></thead><tbody>${job.parse.defects.map(d => `<tr><td>${haveRef.has(d.ref) ? '<span class="stp stp-hist" title="系統已有這個編號：保留原文字，只補齊章節、題目與代碼">已有</span>' : '<span class="stp stp-open">新增</span>'}</td><td class="mono">${esc(d.ref)}</td><td>${esc(d.area)}<div class="dim" style="font-size:11px">${esc(d.question || '')}</div></td><td class="vf-txt">${esc(d.finding)}</td><td class="vf-txt">${esc(d.action_required)}</td><td class="num ${d.due_date ? '' : 'flag'}">${d.due_date ? dfmt(d.due_date) : '—'}</td><td class="mono dim" style="font-size:11px">${[d.pms_code && 'PMS ' + d.pms_code, d.psc_code && 'PSC ' + d.psc_code, d.viq_code && 'VIQ ' + d.viq_code].filter(Boolean).map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table></div>`;
+  const ik = it => String(it.ref || '').trim() ? 'R|' + String(it.ref).trim().toUpperCase() : 'F|' + String(it.finding || '').trim().toUpperCase().slice(0, 60);
+  const haveRef = new Set(M.vitems.filter(it => it.visit_no === job.visitNo).map(ik));
+  return `<div class="tbl-wrap" style="max-height:320px"><table class="vf-t"><thead><tr><th></th><th>編號</th><th>項目／題目</th><th>缺失說明</th><th>矯正要求</th><th>期限</th><th>代碼</th></tr></thead><tbody>${job.parse.defects.map(d => `<tr><td>${haveRef.has(ik(d)) ? '<span class="stp stp-hist" title="系統已有這個編號：保留原文字，只補齊章節、題目與代碼">已有</span>' : '<span class="stp stp-open">新增</span>'}</td><td class="mono" style="white-space:nowrap">${d.ref ? esc(d.ref) : '<span class="dim" title="報告中沒有題號（例：其他觀察）">無題號</span>'}</td><td>${ftypePill(d.ftype)}${esc(d.area || (d.ftype ? d.section : ''))}<div class="dim" style="font-size:11px">${esc(d.question || '')}</div></td><td class="vf-txt">${esc(d.finding)}</td><td class="vf-txt">${esc(d.action_required)}${d.cleared_date ? `<div class="vr-okt" style="font-size:11.5px">報告記錄 ${dfmt(d.cleared_date)} 已清除${d.cleared_by ? '（' + esc(d.cleared_by) + '）' : ''}</div>` : ''}</td><td class="num ${d.due_date ? '' : 'flag'}">${d.due_date ? dfmt(d.due_date) : '—'}</td><td class="mono dim" style="font-size:11px">${[d.pms_code && 'PMS ' + d.pms_code, d.psc_code && 'PSC ' + d.psc_code, d.viq_code && 'VIQ ' + d.viq_code].filter(Boolean).map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function virJobHTML(job, i) {
   const r = job.parse, sm = r.summary, ex = M.visits.find(x => x.visit_no === job.visitNo), ves = shipByName(sm.vessel) || (ex && { vessel: ex.vessel });
-  const facts = [['船舶', esc(sm.vessel || '—') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查日期', sm.date ? dfmt(sm.date) : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['類型', esc(sm.type || '—')], ['評分', esc(sm.score || '—')], ['報告狀態', sm.status ? esc(sm.status) + (/progress/i.test(sm.status) ? ' <span class="flag">未定稿</span>' : '') : '—']];
-  return `<div class="vr-job" data-job="${i}"><div class="vr-head"><div style="min-width:0"><div class="mono dim" style="font-size:11.5px;word-break:break-all">${esc(job.file.name)}・${r.defects.length ? '' : '<span class="flag">讀不到缺失</span>・'}${(job.file.size / 1048576).toFixed(1)} MB</div>
+  const shp = r.format === 'SHIPSURE', bsm = r.format === 'BSM';
+  const facts = bsm ? [['格式', 'BSM Ship Inspection Report'], ['船舶', esc(sm.vessel || '—') + (sm.imo ? ` <span class="dim">IMO ${esc(sm.imo)}</span>` : '') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查期間', sm.date ? dfmt(sm.date) + (sm.date_to && sm.date_to !== sm.date ? ' ~ ' + dfmt(sm.date_to) : '') : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['主文題數', `${sm.tasks}（評語 ${sm.answered}）`], ['附錄缺失', String(r.defects.length)]]
+    : shp ? [['格式', 'V.Ships Shipsure'], ['船舶', esc(sm.vessel || '—') + (sm.imo ? ` <span class="dim">IMO ${esc(sm.imo)}</span>` : '') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查期間', sm.date ? dfmt(sm.date) + (sm.date_to && sm.date_to !== sm.date ? ' ~ ' + dfmt(sm.date_to) : '') : '—'], ['檢查人員', esc(sm.by || '—')], ['公司', esc(sm.company || '—')], ['地點', esc(sm.at || '—')], ['類型', esc(sm.type || '—')], ['已清除', `${sm.cleared} / ${r.defects.length}`]]
+    : [['格式', 'FML Paris'], ['船舶', esc(sm.vessel || '—') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查日期', sm.date ? dfmt(sm.date) : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['類型', esc(sm.type || '—')], ['評分', esc(sm.score || '—')], ['報告狀態', sm.status ? esc(sm.status) + (/progress/i.test(sm.status) ? ' <span class="flag">未定稿</span>' : '') : '—']];
+  return `<div class="vr-job" data-job="${i}"><div class="vr-head"><div style="min-width:0"><div class="mono dim" style="font-size:11.5px;word-break:break-all">${esc(job.file.name)}・${r.defects.length ? '' : '<span class="flag">讀不到缺失</span>・'}${MB(job.file.size)}${job.up && job.up.shrunk ? ` → <b class="vr-okt">壓縮後 ${MB(job.up.size)}</b>（照片長邊 ${job.up.max}px，文字不變）` : job.upErr ? ` <span class="flag">${esc(job.upErr)}</span>` : ''}</div>
     <div class="vr-no"><label>訪船編號 <input class="inp mono" data-no="${i}" value="${esc(job.visitNo)}"></label>${ex ? `<span class="stp stp-sub">已有紀錄・已登錄 ${M.vitems.filter(it => it.visit_no === ex.visit_no && it.st.status !== VS.CANCELLED).length} 項</span>` : '<span class="stp stp-open">新建訪船紀錄</span>'}</div></div>
-    <span class="vr-badge ${r.ok ? 'ok' : 'ng'}">${r.ok ? `比對相符 ${r.defects.length} / ${sm.defects}` : `比對不符 ${r.defects.length} / ${sm.defects ?? '?'}`}</span></div>
+    <span class="vr-badge ${r.ok ? 'ok' : 'ng'}">${shp || bsm ? (r.ok ? `檢查通過・${r.defects.length} 項` : `請檢查・讀到 ${r.defects.length} 項`) : r.ok ? `比對相符 ${r.defects.length} / ${sm.defects}` : `比對不符 ${r.defects.length} / ${sm.defects ?? '?'}`}</span></div>
     <dl class="facts">${facts.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join('')}</dl>
     ${/progress/i.test(sm.status || '') ? '<div class="callout" style="margin:0">報告狀態為 In progress（船管尚未定稿），缺失數可能還會變動；定稿後再上傳一次，系統只補新增的項目。</div>' : ''}
     ${virReconHTML(job)}
@@ -600,7 +725,7 @@ function virJobHTML(job, i) {
 function virPdfModal(x) {
   const jobs = [];
   openModal({ title: '上傳 VIR 報告 PDF', sub: x ? esc(x.visit_no) : '自動讀出缺失、比對報告摘要的缺失數，並建立／更新訪船紀錄', wide: true,
-    html: `<div class="form"><label class="vr-drop" id="vr-drop"><input type="file" id="vr-file" accept="application/pdf,.pdf" multiple hidden><b>選擇或拖曳 VIR 報告 PDF</b><span class="dim">可一次多份。檔名開頭若是訪船編號（例 TEH-VICTORY-2026-01-MGR-VIR_VIR Report.pdf）會自動對應${x ? '；否則歸到目前這筆訪船' : '；否則依船名與日期產生新編號'}。目前支援 FML／Paris 系統產生的 VIR 格式。</span></label>
+    html: `<div class="form"><label class="vr-drop" id="vr-drop"><input type="file" id="vr-file" accept="application/pdf,.pdf" multiple hidden><b>選擇或拖曳 VIR 報告 PDF</b><span class="dim">可一次多份。檔名開頭若是訪船編號（例 TEH-VICTORY-2026-01-MGR-VIR_VIR Report.pdf）會自動對應${x ? '；否則歸到目前這筆訪船' : '；否則依船名與日期產生新編號'}。支援 FML（Paris）、V.Ships（Shipsure）、BSM 三種報告格式，自動判斷。超過 ${MAX_MB} MB 的 PDF 會自動壓縮照片後歸檔（文字與表格不變）。</span></label>
       <div id="vr-prog" class="dim" style="font-size:12.5px"></div><div id="vr-jobs"></div>
       <div id="vr-opts" hidden class="vr-opts"><label><input type="checkbox" id="vr-upd" checked> 以報告內容更新訪船資料（評分、缺失數、章節分布、檢查人員、地點）</label><label><input type="checkbox" id="vr-up" checked> PDF 歸檔到 Drive（文件類別 VIR）</label></div><div id="vr-err" class="err"></div></div>`,
     foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="vr-go" disabled>匯入</button>`,
@@ -618,15 +743,16 @@ function virPdfModal(x) {
         q('#vr-err').textContent = '';
         for (const f of files) {
           if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { q('#vr-err').textContent = f.name + ' 不是 PDF'; continue; }
-          if (f.size > MAX_MB * 1048576) { q('#vr-err').textContent = f.name + ' 超過 ' + MAX_MB + ' MB'; continue; }
           try {
             q('#vr-prog').textContent = `讀取 ${f.name}…`;
             const pages = await pdfTextPages(f, (i, n) => { q('#vr-prog').textContent = `讀取 ${f.name}：第 ${i} / ${n} 頁`; });
-            const parse = PSC.parseVirPages(pages), sm = parse.summary;
-            if (sm.defects === null && !parse.defects.length) { q('#vr-err').textContent = f.name + '：看不出是 VIR 報告（找不到 Defects 摘要與 DEFECT SUMMARY），請改用「匯入缺失（貼上）」'; continue; }
+            const parse = PSC.parseInspectionPages(pages), sm = parse.summary;
+            if (sm.defects === null && !parse.defects.length) { q('#vr-err').textContent = f.name + '：認不出報告格式（目前支援 FML Paris、V.Ships Shipsure、BSM），請改用「匯入缺失（貼上）」'; continue; }
             let no = visitNoFromName(f.name) || (x && !jobs.some(j => j.visitNo === x.visit_no) ? x.visit_no : '');
             if (!no) { const v = shipByName(sm.vessel); if (v) { const taken = M.visits.concat(jobs.map(j => ({ visit_no: j.visitNo }))); no = PSC.nextVisitNo(taken, v.vessel, (sm.date || today()).slice(0, 4), 'MGR', 'VIR'); } }
-            jobs.push({ file: f, parse, visitNo: no });
+            const job = { file: f, parse, visitNo: no };
+            if (f.size > MAX_MB * 1048576) { try { job.up = await fitUpload(f, t => { q('#vr-prog').textContent = `${f.name}：${t}`; }); } catch (e) { job.upErr = e.message; } }
+            jobs.push(job);
           } catch (e) { q('#vr-err').textContent = f.name + '：' + (e.message || e); }
         }
         q('#vr-prog').textContent = ''; draw();
@@ -646,12 +772,16 @@ function virPdfModal(x) {
             if (!j.parse.defects.length) continue;
             const sm = j.parse.summary, ex = M.visits.find(v => v.visit_no === j.visitNo), ship = shipByName(sm.vessel), p = PSC.parseVisitNo(j.visitNo) || {};
             const row = { visit_no: j.visitNo, is_new: !ex };
-            if (!ex) Object.assign(row, { vessel: ship ? ship.vessel : '', party: p.party || 'MGR', vtype: p.vtype || 'VIR', date_from: sm.date || '' });
-            if (!ex || upd) Object.assign(row, { score: sm.score, reported_defects: sm.defects ?? '', tasks: sm.tasks ?? '', reported_breakdown: PSC.breakdownText(sm.categories), report_status: sm.status, inspector: (ex && ex.inspector) || sm.by, port: (ex && ex.port) || [sm.at, sm.type].filter(Boolean).join('（') + (sm.type ? '）' : '') });
+            const shp = j.parse.format === 'SHIPSURE' || j.parse.format === 'BSM';
+            if (!ex) Object.assign(row, { vessel: ship ? ship.vessel : '', party: p.party || 'MGR', vtype: p.vtype || 'VIR', date_from: sm.date || '', date_to: sm.date_to || '' });
+            if (!ex || upd) Object.assign(row, { score: sm.score, reported_defects: shp ? j.parse.defects.length : sm.defects ?? '', tasks: sm.tasks ?? '', reported_breakdown: PSC.breakdownText(sm.categories), report_status: sm.status, inspector: (ex && ex.inspector) || [sm.by, shp && sm.company ? '(' + sm.company + ')' : ''].filter(Boolean).join(' '), port: (ex && ex.port) || (shp ? sm.at : [sm.at, sm.type].filter(Boolean).join('（') + (sm.type ? '）' : '')) });
+            if (shp && sm.comments && !(ex && ex.note)) row.note = 'V.Ships 檢查意見：' + sm.comments;
             if (ex && !ex.date_from && sm.date) row.date_from = sm.date;
             await api('saveVisit', row);
             const r = await api('importVisitItems', { visit_no: j.visitNo, items: j.parse.defects, update_existing: true });
-            if (upl) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: j.file.name, mime: 'application/pdf', size: j.file.size, base64: await fileB64(j.file), note: `VIR ${sm.defects ?? '?'} defects / ${sm.tasks ?? '?'} tasks・score ${sm.score || '—'}・${sm.status || ''}` });
+            if (upl && j.upErr) throw new Error(j.upErr + '。可取消勾選「PDF 歸檔到 Drive」只匯入缺失');
+            const ub = j.up ? j.up.blob : j.file;
+            if (upl) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: j.file.name, mime: 'application/pdf', size: ub.size, base64: await fileB64(ub), note: (j.parse.format === 'BSM' ? `BSM ${j.parse.defects.length} deficiencies / ${sm.tasks} questions` : j.parse.format === 'SHIPSURE' ? `V.Ships Shipsure ${j.parse.defects.length} findings（${Object.entries(sm.byType || {}).map(([k, v]) => k + ' ' + v).join('、')}）・cleared ${sm.cleared}` : `VIR ${sm.defects ?? '?'} defects / ${sm.tasks ?? '?'} tasks・score ${sm.score || '—'}・${sm.status || ''}`) + (j.up ? shrinkNote(j.up) : '') });
             out.push(`${j.visitNo}：新增 ${r.added.length}${r.skipped ? '、已有 ' + r.skipped : ''}${r.updated && r.updated.length ? '（補齊 ' + r.updated.length + '）' : ''}`);
           }
           await close(); await reload();
@@ -678,7 +808,7 @@ function visitItemModal(id) {
   const acts = !ed ? [] : st.status === VS.OPEN ? [['submit', '提交矯正（待確認）', ''], ['close', '確認關閉', 'primary']] : st.status === VS.SUBMITTED ? [['reject', '退回', 'danger'], ['close', '確認關閉', 'primary']] : st.status === VS.CLOSED ? [['reopen', '重新開啟', '']] : [['reopen', '恢復', '']];
   if (can('admin') && st.status !== VS.CANCELLED) acts.unshift(['cancel', '撤銷（登錄錯誤）', 'ghost']);
   openModal({ title: `${esc(it.ref || '#' + it.seq)} ${esc(it.area)}`, sub: `${esc(it.item_id)}・${esc(it.v ? it.v.vessel : '')}・${esc(it.section || '')}`,
-    html: `<div class="vf-item"><div class="btnrow">${vsPill(it)}${it.due_date ? `<span class="dim">改善期限 ${dfmt(it.due_date)}${st.active && st.daysLeft !== null ? (st.daysLeft < 0 ? `（已過 ${-st.daysLeft} 天）` : `（剩 ${st.daysLeft} 天）`) : ''}</span>` : ''}${st.ontime === false ? '<span class="stp stp-over">逾期提交</span>' : ''}${ed ? '<button class="btn sm ghost" type="button" id="vm-editc">修改缺失內容</button>' : ''}</div>
+    html: `<div class="vf-item"><div class="btnrow">${ftypePill(it.ftype)}${vsPill(it)}${it.due_date ? `<span class="dim">改善期限 ${dfmt(it.due_date)}${st.status === VS.SUBMITTED && it.submitted_at ? `（${dfmt(it.submitted_at)} 提交）` : st.active && st.daysLeft !== null ? (st.daysLeft < 0 ? `（已過 ${-st.daysLeft} 天）` : `（剩 ${st.daysLeft} 天）`) : ''}</span>` : ''}${st.ontime === false ? '<span class="stp stp-over">逾期提交</span>' : ''}${ed ? '<button class="btn sm ghost" type="button" id="vm-editc">修改缺失內容</button>' : ''}</div>
     ${it.question || it.pms_code || it.psc_code || it.viq_code || it.score ? `<div class="vf-blk"><span>檢查題目</span><p>${esc(it.question || '—')}</p><div class="vr-codes">${[['PMS', it.pms_code], ['PSC', it.psc_code], ['VIQ', it.viq_code], ['評分', it.score]].filter(c => c[1]).map(c => `<span class="pill cat">${c[0]} ${esc(c[1])}</span>`).join('')}</div></div>` : ''}
     <div id="vm-view"><div class="vf-blk"><span>缺失說明</span><p>${esc(it.finding) || '—'}</p></div><div class="vf-blk"><span>矯正要求</span><p>${esc(it.action_required) || '—'}</p></div></div>
     <div id="vm-editbox" hidden><div class="frow"><div class="field"><label>編號</label><input class="inp mono" data-e="ref" value="${esc(it.ref)}"></div><div class="field"><label>項目</label><input class="inp" data-e="area" value="${esc(it.area)}"></div><div class="field"><label>章節</label><input class="inp" data-e="section" value="${esc(it.section)}"></div><div class="field"><label>改善期限</label><input class="inp" type="date" data-e="due_date" value="${esc(it.due_date)}"></div><div class="field"><label>風險</label><select data-e="risk">${['', 'High', 'Medium', 'Low'].map(r => opt(r, r || '—', it.risk === r)).join('')}</select></div></div><div class="field"><label>缺失說明</label><textarea class="inp" rows="2" data-e="finding">${esc(it.finding)}</textarea></div><div class="field"><label>矯正要求</label><textarea class="inp" rows="2" data-e="action_required">${esc(it.action_required)}</textarea></div><div class="btnrow"><button class="btn primary sm" type="button" id="vm-savec">儲存內容</button></div></div>
@@ -700,7 +830,7 @@ function visitItemModal(id) {
       const sc = q('#vm-savec'); if (sc) sc.addEventListener('click', () => { const row = { item_id: id }; root.querySelectorAll('[data-e]').forEach(el => { row[el.dataset.e] = el.value.trim(); }); run(async () => { await api('saveVisitItem', row); await close(); await reload(); toast('已更新 ' + id); }, sc); });
       const ub = q('#vm-up'); if (ub) ub.addEventListener('click', () => {
         const files = [...q('#vm-file').files]; if (!files.length) { q('#vm-err').textContent = '請先選擇檔案'; return; }
-        run(async () => { for (const fl of files) { if (fl.size > MAX_MB * 1048576) throw new Error(fl.name + ' 超過 ' + MAX_MB + ' MB'); const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('讀取檔案失敗')); r.readAsDataURL(fl); }); await api('uploadDocument', { tracking_no: it.visit_no, doc_type: q('#vm-dt').value, original_name: fl.name, mime: fl.type, size: fl.size, base64: b64, note: id }); } await close(); await reload(); toast('已上傳 ' + files.length + ' 個檔案'); visitItemModal(id); }, ub);
+        run(async () => { for (const fl of files) { const u = await fitUpload(fl, t => { ub.textContent = t; }); ub.textContent = '上傳中…'; await api('uploadDocument', { tracking_no: it.visit_no, doc_type: q('#vm-dt').value, original_name: fl.name, mime: u.shrunk ? u.blob.type : fl.type, size: u.size, base64: await fileB64(u.blob), note: (id + ' ' + shrinkNote(u)).trim() }); } await close(); await reload(); toast('已上傳 ' + files.length + ' 個檔案'); visitItemModal(id); }, ub);
       });
     } });
 }
@@ -1169,7 +1299,7 @@ function docChecklist(X, psc) {
 function docTypesFor(psc) { if (psc === 'visit') return PSC.DOC_TYPES.filter(t => ['VIR', 'RECT', 'EVID', 'CORR', 'OTH'].includes(t.code)); return PSC.DOC_TYPES.filter(t => !t.visit && (psc ? !t.inc : !t.psc)); }
 function uploadHTML(base, psc) {
   const types = docTypesFor(psc); if (!types.some(t => t.code === S.upType)) S.upType = psc === 'visit' ? 'VIR' : psc ? 'PSC-B' : 'RPT';
-  return `<div class="drop" style="margin-bottom:12px"><div class="frow"><div class="field"><label for="up-type">文件類別</label><select id="up-type">${types.map(t => opt(t.code, `${t.code}　${t.name}`, S.upType === t.code)).join('')}</select></div><div class="field"><label for="up-file">檔案（單檔 ${MAX_MB} MB 以內）</label><input class="inp" type="file" id="up-file" multiple></div><div class="field"><label for="up-note">說明（選填）</label><input class="inp" id="up-note" placeholder="例如：Form B 第 2 頁補件"></div></div><div class="btnrow"><button class="btn primary" type="button" id="up-go">上傳並歸檔</button><span class="dim" id="up-preview" style="font-size:12.5px"></span></div></div>`;
+  return `<div class="drop" style="margin-bottom:12px"><div class="frow"><div class="field"><label for="up-type">文件類別</label><select id="up-type">${types.map(t => opt(t.code, `${t.code}　${t.name}`, S.upType === t.code)).join('')}</select></div><div class="field"><label for="up-file">檔案（單檔 ${MAX_MB} MB 以內；超過時 PDF 與照片自動壓縮）</label><input class="inp" type="file" id="up-file" multiple></div><div class="field"><label for="up-note">說明（選填）</label><input class="inp" id="up-note" placeholder="例如：Form B 第 2 頁補件"></div></div><div class="btnrow"><button class="btn primary" type="button" id="up-go">上傳並歸檔</button><span class="dim" id="up-preview" style="font-size:12.5px"></span></div></div>`;
 }
 function docListHTML(docs, psc) {
   const groups = docTypesFor(psc).concat(PSC.DOC_TYPES.filter(t => !docTypesFor(psc).includes(t))).map(t => ({ t, docs: docs.filter(d => d.doc_type === t.code).sort((a, b) => +a.seq - +b.seq) })).filter(g => g.docs.length);
@@ -1179,18 +1309,18 @@ function wireUpload(base, docs, target) {
   const ub = $('#up-go'); if (!ub) return;
   const prev = () => { const t = $('#up-type').value, n = docs.filter(d => d.doc_type === t).reduce((m, d) => Math.max(m, +d.seq || 0), 0) + 1; const f = $('#up-file').files[0]; $('#up-preview').textContent = '將存為 ' + PSC.documentFileName(PSC.documentId(base, t, n), f ? f.name : '.pdf') + ($('#up-file').files.length > 1 ? ` 等 ${$('#up-file').files.length} 個檔案` : ''); };
   $('#up-type').addEventListener('change', () => { S.upType = $('#up-type').value; prev(); }); $('#up-file').addEventListener('change', prev); prev();
+  const ubLabel = ub.textContent;
   ub.addEventListener('click', () => {
     const files = [...$('#up-file').files]; if (!files.length) { toast('請先選擇檔案'); return; }
-    const big = files.find(f => f.size > MAX_MB * 1048576); if (big) { toast(`${big.name} 超過 ${MAX_MB} MB，請壓縮後再上傳`); return; }
     run(async () => {
       const names = [];
       for (const f of files) {
-        const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(new Error('讀取檔案失敗')); r.readAsDataURL(f); });
-        const d = await api('uploadDocument', Object.assign({ doc_type: $('#up-type').value, original_name: f.name, mime: f.type, size: f.size, base64: b64, note: $('#up-note').value }, target));
+        const u = await fitUpload(f, t => { ub.textContent = t; }); ub.textContent = '上傳中…';
+        const d = await api('uploadDocument', Object.assign({ doc_type: $('#up-type').value, original_name: f.name, mime: u.shrunk ? u.blob.type : f.type, size: u.size, base64: await fileB64(u.blob), note: ($('#up-note').value + ' ' + shrinkNote(u)).trim() }, target));
         names.push(d.file_name);
       }
       await reload(); toast('已歸檔：' + names.join('、'), 6000);
-    }, ub);
+    }, ub).finally(() => { if (document.body.contains(ub)) ub.textContent = ubLabel; });
   });
 }
 function closeBoxHTML(msg) {

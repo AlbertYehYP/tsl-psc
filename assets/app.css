@@ -494,7 +494,7 @@ tr.click:hover td{background:var(--surface-2)}
 .vr-job{display:grid;gap:10px;padding:14px;border:1px solid var(--line);border-radius:12px;margin-top:10px}
 .vr-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
 .vr-no{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px;font-size:12.5px}
-.vr-no .inp{width:min(320px,100%);margin-left:4px}
+.vr-no .inp{width:min(380px,100%);margin-left:4px}
 .vr-badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;white-space:nowrap}
 .vr-badge.ok{background:var(--rk-h-soft);color:var(--rk-h)}
 .vr-badge.ng{background:var(--crit-soft);color:var(--crit)}
@@ -518,3 +518,8 @@ tr.click:hover td{background:var(--surface-2)}
 .vr-chip.ok b{color:var(--rk-h)}
 .vr-codes{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 .vr-okt{color:var(--rk-h)}
+.ftype{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.02em;padding:1px 6px;border-radius:5px;margin-right:6px;vertical-align:1px}
+.ftype.ft-d{background:var(--crit-soft);color:var(--crit)}
+.ftype.ft-o{background:var(--surface-2);color:var(--ink-2);border:1px solid var(--line)}
+.vr-checks{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:3px;font-size:12.5px}
+.vr-checks .ok{color:var(--rk-h)}.vr-checks .ng{color:var(--crit);font-weight:600}
