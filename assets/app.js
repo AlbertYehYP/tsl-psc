@@ -6,12 +6,20 @@ const CAT = PSC.CATEGORIES, ACT = PSC.ACTIONS, ST = PSC.STATUS;
 const SECTIONS = {
   inc: { tabs: [['inc-overview', '事故分析'], ['inc-vessels', '船舶事故'], ['incidents', '事故登錄與處理'], ['report', '週報／月報'], ['inc-rules', '事故規範']] },
   vf: { tabs: [['vf-overview', '總覽'], ['visits', '訪船紀錄'], ['vf-items', '缺失追蹤'], ['vf-ships', '船舶履歷']] },
-  psc: { tabs: [['overview', '總覽'], ['map', '地圖'], ['inspections', '檢查登錄'], ['records', '缺失查詢'], ['vessels', '船舶檔案'], ['window', 'PSC 窗口'], ['bribe', '索賄分析'], ['codes', '代碼參考']] },
+  psc: { tabs: [['overview', '總覽'], ['map', '地圖'], ['inspections', '檢查登錄'], ['records', '缺失查詢'], ['vessels', '船舶檔案'], ['window', 'PSC 窗口'], ['portintel', '港口／國家'], ['bribe', '索賄分析'], ['codes', '代碼參考']] },
   admin: { tabs: [['admin', '系統管理']] }
 };
 const TAB_LIST = Object.values(SECTIONS).flatMap(x => x.tabs.map(t => t[0]));
 const secOf = t => Object.keys(SECTIONS).find(k => SECTIONS[k].tabs.some(x => x[0] === t)) || 'psc';
 const MAX_MB = 20;
+/** 前端程式版本（與 core.js 的 PSC.VERSION、後端 core.gs 必須一致） */
+const APP_VERSION = '1.14.0';
+/** 版本不一致警示：顯示在頁首下方，避免瀏覽器快取舊檔或漏更新某個檔案時沒人發現 */
+function versionBanner(kind, html) {
+  let el = document.getElementById('ver-bar');
+  if (!el) { el = document.createElement('div'); el.id = 'ver-bar'; const anchor = document.getElementById('demo-bar') || document.querySelector('header'); if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor.nextSibling); else document.body.prepend(el); }
+  el.className = 'ver-bar ' + kind; el.innerHTML = html; el.hidden = false;
+}
 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
@@ -109,6 +117,8 @@ const Demo = {
 /* ---------- API / auth ---------- */
 const Auth = { token: null, email: '', name: '', exp: 0 };
 async function api(action, payload) {
+  if (CFG.demo && action === 'fetchUrl') throw new Error('示範模式不連線外部網站；請改用「匯入檢查／留置紀錄」上傳檔案或貼上表格');
+  if (CFG.demo && (action === 'mouWatchNow' || action === 'mouPdf')) throw new Error('示範模式不連線外部網站；正式版由後端每季自動檢查 Tokyo MOU、Paris MOU 官網的年報');
   if (CFG.demo) return Demo.call(action, payload || {});
   if (!Auth.token || Date.now() / 1000 > Auth.exp - 30) { showLogin('登入已過期，請重新登入'); throw new Error('登入已過期，請重新登入'); }
   if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]{20,}\/exec$/.test(String(CFG.apiUrl).trim())) throw new Error('config.js 的 apiUrl 不是 Apps Script 部署網址（應為 https://script.google.com/macros/s/……/exec，請整串貼上「管理部署作業」裡的網址）');
@@ -117,7 +127,7 @@ async function api(action, payload) {
   catch (e) { throw new Error('連不到後端（Apps Script）。請確認：1) config.js 的 apiUrl 是「管理部署作業」裡的 /exec 網址；2) 部署的「具有存取權的使用者」是「所有人」；3) 用無痕視窗直接打開 apiUrl 會看到 {"ok":true…}'); }
   try { j = await r.json(); } catch (e) { throw new Error('後端回傳的不是資料（HTTP ' + r.status + '）。通常是 Apps Script 尚未授權或部署設定錯誤：請在 Apps Script 執行一次 setup，再「管理部署作業 → 編輯 → 新版本 → 部署」'); }
   if (!j.ok) throw new Error(/PSC is not defined/.test(j.error || '') ? '後端缺少 core.gs：請在 Apps Script 把「core」檔整份換成 apps-script/core.gs 的內容（開頭是「TSL PSC System — shared core logic」），「Code」檔放 Code.gs，儲存後部署新版本。' : (j.error || '伺服器錯誤'));
-  if (action === 'bootstrap' && j.data && j.data.version && j.data.version !== PSC.VERSION) console.warn('前端 ' + PSC.VERSION + '／後端 ' + j.data.version + ' 版本不同，請部署相同版本');
+  if (action === 'bootstrap' && j.data && j.data.version && j.data.version !== PSC.VERSION) versionBanner('warn', `<b>前後端版本不同</b>：網頁 v${esc(PSC.VERSION)}、後端（Apps Script）v${esc(j.data.version)}。請把 Apps Script 的 core 檔換成同一版的 core.gs，並「管理部署作業 → 編輯 → 新版本」。`);
   return j.data;
 }
 function jwtPayload(t) { try { return JSON.parse(decodeURIComponent(escape(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))))); } catch (e) { return {}; } }
@@ -196,7 +206,7 @@ function buildModel(raw) {
   const lastInc = incidents.length ? incidents[0].date : '';
   return { insp, recs, vreg, byId, incidents, incByNo, asof: [insp.length ? insp[0].date : '', lastInc].sort().pop(), settings: raw.settings || {}, users: raw.users || [], vessels: raw.vessels || [],
     templates: raw.templates || PSC.templatesOf([]), companies: raw.companies || [], risk: raw.riskProfiles || [], nk: raw.nkStatus || [], mouMap: raw.mouMap || [], canBribe: !!raw.canBribe,
-    rules: raw.rules || [], ports: raw.ports || [], docsByNo, visits, vitems };
+    rules: raw.rules || [], ports: raw.ports || [], docsByNo, visits, vitems, rightship: raw.rightship || [], portPsc: raw.portPsc || [], portStats: raw.portStats || [] };
 }
 const vkey = x => String(x.imo || x.vessel);
 
@@ -456,6 +466,7 @@ function vVisits(v) {
   $('#vs-party').addEventListener('change', e => { f.party = e.target.value; render(); });
   let t; $('#vs-q').addEventListener('input', e => { clearTimeout(t); t = setTimeout(() => { f.q = e.target.value.trim(); render(); setTimeout(() => { const q = $('#vs-q'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 0); }, 300); });
   v.querySelectorAll('[data-vno]').forEach(b => b.addEventListener('click', () => openVisit(b.dataset.vno)));
+  sortableCards((v.querySelector('.vgrid > [data-vno]') || {}).parentElement, { key: 'visits', attr: 'vno' });
   const nb = $('#vs-new'); if (nb) nb.addEventListener('click', () => editVisit(null)); const pb = $('#vs-pdf'); if (pb) pb.addEventListener('click', () => virPdfModal(null));
 }
 function visitItemsTable(items, opts) {
@@ -680,6 +691,7 @@ function shipsureReconHTML(job) {
 }
 /** BSM：附錄缺失單 vs 主文評為 No／Fair／Poor 的題目 */
 function bsmReconHTML(job) {
+  if (job.parse.mode === 'body') return bsmBodyReconHTML(job);
   const r = job.parse, sm = r.summary, have = M.vitems.filter(it => it.visit_no === job.visitNo && it.st.status !== VS.CANCELLED);
   const neg = r.reconcile.reduce((a, x) => a + x.negative, 0), lst = r.reconcile.reduce((a, x) => a + x.listed, 0);
   const subs = Object.keys(sm.categories);
@@ -689,6 +701,16 @@ function bsmReconHTML(job) {
   <ul class="vr-checks">${r.checks.map(c => `<li class="${c.ok ? 'ok' : 'ng'}">${c.ok ? '✓' : '✗'} ${esc(c.label)}${c.detail ? `：<span class="mono">${esc(c.detail)}</span>` : ''}</li>`).join('')}${sm.unanswered && sm.unanswered.length ? `<li class="ng">✗ 主文有 ${sm.unanswered.length} 題讀不到評語：${esc(sm.unanswered.slice(0, 8).join('、'))}</li>` : ''}</ul>
   <p class="note" style="margin:6px 0 0">BSM 報告的缺失列在附錄「SUPERINTENDENT VESSEL INSPECTION」缺失單（匯入以此為準）；主文 ${sm.tasks} 題中評為 No／Fair／Poor 的題目應該都列入附錄，用來確認沒有漏列。直接原因與根本原因寫在缺失說明下方，負責職位寫在矯正要求。</p>
   ${r.onlyInDetail.length ? `<div class="callout" style="margin:8px 0 0">主文評為負面、但附錄沒列：${r.onlyInDetail.map(b => esc(b.section + ' 第 ' + b.body_no + ' 題（' + b.answer + '）')).join('、')}。這幾項不會自動匯入，請向船管確認。</div>` : ''}`;
+}
+/** BSM 沒有附錄缺失單：從主文評語擷取 */
+function bsmBodyReconHTML(job) {
+  const r = job.parse, sm = r.summary, have = M.vitems.filter(it => it.visit_no === job.visitNo && it.st.status !== VS.CANCELLED);
+  const a = r.defects.filter(d => d.basis === 'answer').length, c = r.defects.length - a;
+  return `<div class="callout" style="margin:0 0 10px">這份 BSM 報告<b>沒有附錄缺失單</b>（報告內寫「另記為 NC／Observation」，清單不在這份 PDF）。系統改從主文評語擷取：評為 No／Fair／Poor 的 ${a} 題，加上評語 Yes 但留言註明另記為 NC／Observation 的 ${c} 題，共 ${r.defects.length} 項。請再向 BSM 索取正式的 NC／Observation 清單核對。</div>
+  <div class="tbl-wrap"><table class="vr-t"><thead><tr><th>主文章節</th><th class="n">題數</th><th class="n">評為 No／Fair／Poor</th><th class="n">擷取為缺失</th><th class="n">系統已登錄</th></tr></thead><tbody>${r.reconcile.map(x => `<tr><td>${esc(x.section)}</td><td class="n">${x.questions}</td><td class="n">${x.negative || '·'}</td><td class="n">${x.listed || '·'}</td><td class="n">${have.filter(it => secKey(it.section) === secKey(x.section)).length || '·'}</td></tr>`).join('')}
+  <tr class="vr-sum"><td>合計</td><td class="n">${sm.tasks}</td><td class="n">${a}</td><td class="n">${r.defects.length}</td><td class="n">${have.length}</td></tr></tbody></table></div>
+  <ul class="vr-checks">${r.checks.map(x => `<li class="${x.ok ? 'ok' : 'ng'}">${x.ok ? '✓' : '✗'} ${esc(x.label)}${x.detail ? `：<span class="mono">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>
+  <p class="note" style="margin:6px 0 0">編號 Q章節.題號（例 Q4.23 = 第 4 章 Safety Management 第 23 題）。Not Seen（未檢查）${sm.notSeen || 0} 題不列為缺失。報告沒有寫期限，匯入時套用下方「未寫期限的項目」設定。</p>`;
 }
 function virReconHTML(job) {
   if (job.parse.format === 'SHIPSURE') return shipsureReconHTML(job);
@@ -706,12 +728,12 @@ function virReconHTML(job) {
 function virItemsHTML(job) {
   const ik = it => String(it.ref || '').trim() ? 'R|' + String(it.ref).trim().toUpperCase() : 'F|' + String(it.finding || '').trim().toUpperCase().slice(0, 60);
   const haveRef = new Set(M.vitems.filter(it => it.visit_no === job.visitNo).map(ik));
-  return `<div class="tbl-wrap" style="max-height:320px"><table class="vf-t"><thead><tr><th></th><th>編號</th><th>項目／題目</th><th>缺失說明</th><th>矯正要求</th><th>期限</th><th>代碼</th></tr></thead><tbody>${job.parse.defects.map(d => `<tr><td>${haveRef.has(ik(d)) ? '<span class="stp stp-hist" title="系統已有這個編號：保留原文字，只補齊章節、題目與代碼">已有</span>' : '<span class="stp stp-open">新增</span>'}</td><td class="mono" style="white-space:nowrap">${d.ref ? esc(d.ref) : '<span class="dim" title="報告中沒有題號（例：其他觀察）">無題號</span>'}</td><td>${ftypePill(d.ftype)}${esc(d.area || (d.ftype ? d.section : ''))}<div class="dim" style="font-size:11px">${esc(d.question || '')}</div></td><td class="vf-txt">${esc(d.finding)}</td><td class="vf-txt">${esc(d.action_required)}${d.cleared_date ? `<div class="vr-okt" style="font-size:11.5px">報告記錄 ${dfmt(d.cleared_date)} 已清除${d.cleared_by ? '（' + esc(d.cleared_by) + '）' : ''}</div>` : ''}</td><td class="num ${d.due_date ? '' : 'flag'}">${d.due_date ? dfmt(d.due_date) : '—'}</td><td class="mono dim" style="font-size:11px">${[d.pms_code && 'PMS ' + d.pms_code, d.psc_code && 'PSC ' + d.psc_code, d.viq_code && 'VIQ ' + d.viq_code].filter(Boolean).map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="tbl-wrap" style="max-height:320px"><table class="vf-t"><thead><tr><th></th><th>編號</th><th>項目／題目</th><th>缺失說明</th><th>矯正要求</th><th>期限</th><th>代碼</th></tr></thead><tbody>${job.parse.defects.map(d => `<tr><td>${haveRef.has(ik(d)) ? '<span class="stp stp-hist" title="系統已有這個編號：保留原文字，只補齊章節、題目與代碼">已有</span>' : '<span class="stp stp-open">新增</span>'}</td><td class="mono" style="white-space:nowrap">${d.ref ? esc(d.ref) : '<span class="dim" title="報告中沒有題號（例：其他觀察）">無題號</span>'}</td><td>${ftypePill(d.ftype)}${esc(d.area || (d.ftype ? d.section : ''))}<div class="dim" style="font-size:11px">${esc(d.question || '')}</div></td><td class="vf-txt">${esc(d.finding)}</td><td class="vf-txt">${esc(d.action_required)}${d.cleared_date ? `<div class="vr-okt" style="font-size:11.5px">報告記錄 ${dfmt(d.cleared_date)} 已清除${d.cleared_by ? '（' + esc(d.cleared_by) + '）' : ''}</div>` : ''}</td><td class="num ${d.due_date ? '' : 'flag'}">${d.due_date ? dfmt(d.due_date) : '—'}</td><td class="mono dim" style="font-size:11px">${[d.pms_code && 'PMS ' + d.pms_code, d.psc_code && 'PSC ' + d.psc_code, d.viq_code && 'VIQ ' + d.viq_code, d.body_answer && '評語 ' + d.body_answer + (d.basis === 'comment' ? '（留言註明）' : '')].filter(Boolean).map(esc).join('<br>')}</td></tr>`).join('')}</tbody></table></div>`;
 }
 function virJobHTML(job, i) {
   const r = job.parse, sm = r.summary, ex = M.visits.find(x => x.visit_no === job.visitNo), ves = shipByName(sm.vessel) || (ex && { vessel: ex.vessel });
   const shp = r.format === 'SHIPSURE', bsm = r.format === 'BSM';
-  const facts = bsm ? [['格式', 'BSM Ship Inspection Report'], ['船舶', esc(sm.vessel || '—') + (sm.imo ? ` <span class="dim">IMO ${esc(sm.imo)}</span>` : '') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查期間', sm.date ? dfmt(sm.date) + (sm.date_to && sm.date_to !== sm.date ? ' ~ ' + dfmt(sm.date_to) : '') : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['主文題數', `${sm.tasks}（評語 ${sm.answered}）`], ['附錄缺失', String(r.defects.length)]]
+  const facts = bsm ? [['格式', 'BSM Ship Inspection Report'], ['船舶', esc(sm.vessel || '—') + (sm.imo ? ` <span class="dim">IMO ${esc(sm.imo)}</span>` : '') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查期間', sm.date ? dfmt(sm.date) + (sm.date_to && sm.date_to !== sm.date ? ' ~ ' + dfmt(sm.date_to) : '') : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['主文題數', `${sm.tasks}（評語 ${sm.answered}）`], r.mode === 'body' ? ['擷取缺失', `${r.defects.length}（無附錄缺失單）`] : ['附錄缺失', String(r.defects.length)]]
     : shp ? [['格式', 'V.Ships Shipsure'], ['船舶', esc(sm.vessel || '—') + (sm.imo ? ` <span class="dim">IMO ${esc(sm.imo)}</span>` : '') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查期間', sm.date ? dfmt(sm.date) + (sm.date_to && sm.date_to !== sm.date ? ' ~ ' + dfmt(sm.date_to) : '') : '—'], ['檢查人員', esc(sm.by || '—')], ['公司', esc(sm.company || '—')], ['地點', esc(sm.at || '—')], ['類型', esc(sm.type || '—')], ['已清除', `${sm.cleared} / ${r.defects.length}`]]
     : [['格式', 'FML Paris'], ['船舶', esc(sm.vessel || '—') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查日期', sm.date ? dfmt(sm.date) : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['類型', esc(sm.type || '—')], ['評分', esc(sm.score || '—')], ['報告狀態', sm.status ? esc(sm.status) + (/progress/i.test(sm.status) ? ' <span class="flag">未定稿</span>' : '') : '—']];
   return `<div class="vr-job" data-job="${i}"><div class="vr-head"><div style="min-width:0"><div class="mono dim" style="font-size:11.5px;word-break:break-all">${esc(job.file.name)}・${r.defects.length ? '' : '<span class="flag">讀不到缺失</span>・'}${MB(job.file.size)}${job.up && job.up.shrunk ? ` → <b class="vr-okt">壓縮後 ${MB(job.up.size)}</b>（照片長邊 ${job.up.max}px，文字不變）` : job.upErr ? ` <span class="flag">${esc(job.upErr)}</span>` : ''}</div>
@@ -727,7 +749,7 @@ function virPdfModal(x) {
   openModal({ title: '上傳 VIR 報告 PDF', sub: x ? esc(x.visit_no) : '自動讀出缺失、比對報告摘要的缺失數，並建立／更新訪船紀錄', wide: true,
     html: `<div class="form"><label class="vr-drop" id="vr-drop"><input type="file" id="vr-file" accept="application/pdf,.pdf" multiple hidden><b>選擇或拖曳 VIR 報告 PDF</b><span class="dim">可一次多份。檔名開頭若是訪船編號（例 TEH-VICTORY-2026-01-MGR-VIR_VIR Report.pdf）會自動對應${x ? '；否則歸到目前這筆訪船' : '；否則依船名與日期產生新編號'}。支援 FML（Paris）、V.Ships（Shipsure）、BSM 三種報告格式，自動判斷。超過 ${MAX_MB} MB 的 PDF 會自動壓縮照片後歸檔（文字與表格不變）。</span></label>
       <div id="vr-prog" class="dim" style="font-size:12.5px"></div><div id="vr-jobs"></div>
-      <div id="vr-opts" hidden class="vr-opts"><label><input type="checkbox" id="vr-upd" checked> 以報告內容更新訪船資料（評分、缺失數、章節分布、檢查人員、地點）</label><label><input type="checkbox" id="vr-up" checked> PDF 歸檔到 Drive（文件類別 VIR）</label></div><div id="vr-err" class="err"></div></div>`,
+      <div id="vr-opts" hidden class="vr-opts"><label><input type="checkbox" id="vr-upd" checked> 以報告內容更新訪船資料（評分、缺失數、章節分布、檢查人員、地點）</label><label><input type="checkbox" id="vr-up" checked> PDF 歸檔到 Drive（文件類別 VIR）</label><label id="vr-due-row" hidden>報告沒寫期限的項目，改善期限設為 <input type="date" class="inp" id="vr-due" style="width:auto;display:inline-block"> <span class="dim">（空白 = 不設期限，不會列入逾期）</span></label></div><div id="vr-err" class="err"></div></div>`,
     foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="vr-go" disabled>匯入</button>`,
     onMount(root, close) {
       const q = s2 => root.querySelector(s2), go = q('#vr-go');
@@ -735,6 +757,8 @@ function virPdfModal(x) {
       const draw = () => {
         q('#vr-jobs').innerHTML = jobs.map(virJobHTML).join('');
         q('#vr-opts').hidden = !jobs.length;
+        const nod = jobs.reduce((a, j) => a + j.parse.defects.filter(d => !d.due_date).length, 0); q('#vr-due-row').hidden = !nod;
+        if (nod && !q('#vr-due').dataset.set) { const d = new Date(today() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 30); q('#vr-due').value = d.toISOString().slice(0, 10); q('#vr-due').dataset.set = '1'; }
         const n = jobs.reduce((a, j) => a + j.parse.defects.length, 0);
         go.disabled = !jobs.some(j => j.parse.defects.length); go.textContent = jobs.length > 1 ? `匯入 ${jobs.length} 份（${n} 項）` : `匯入 ${n} 項`;
         root.querySelectorAll('[data-no]').forEach(inp => inp.addEventListener('change', () => { jobs[+inp.dataset.no].visitNo = inp.value.trim().toUpperCase(); draw(); }));
@@ -765,7 +789,7 @@ function virPdfModal(x) {
       go.addEventListener('click', () => {
         const bad = jobs.find(j => j.parse.defects.length && !PSC.parseVisitNo(j.visitNo) && !M.visits.some(v => v.visit_no === j.visitNo));
         if (bad) { q('#vr-err').textContent = bad.file.name + '：請填訪船編號（格式 船名-年度-序號-檢查方-類別）'; return; }
-        const upd = q('#vr-upd').checked, upl = q('#vr-up').checked;
+        const upd = q('#vr-upd').checked, upl = q('#vr-up').checked, defDue = q('#vr-due-row').hidden ? '' : q('#vr-due').value;
         run(async () => {
           const out = [];
           for (const j of jobs) {
@@ -778,10 +802,10 @@ function virPdfModal(x) {
             if (shp && sm.comments && !(ex && ex.note)) row.note = 'V.Ships 檢查意見：' + sm.comments;
             if (ex && !ex.date_from && sm.date) row.date_from = sm.date;
             await api('saveVisit', row);
-            const r = await api('importVisitItems', { visit_no: j.visitNo, items: j.parse.defects, update_existing: true });
+            const r = await api('importVisitItems', { visit_no: j.visitNo, items: j.parse.defects.map(d => d.due_date || !defDue ? d : Object.assign({}, d, { due_date: defDue })), update_existing: true });
             if (upl && j.upErr) throw new Error(j.upErr + '。可取消勾選「PDF 歸檔到 Drive」只匯入缺失');
             const ub = j.up ? j.up.blob : j.file;
-            if (upl) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: j.file.name, mime: 'application/pdf', size: ub.size, base64: await fileB64(ub), note: (j.parse.format === 'BSM' ? `BSM ${j.parse.defects.length} deficiencies / ${sm.tasks} questions` : j.parse.format === 'SHIPSURE' ? `V.Ships Shipsure ${j.parse.defects.length} findings（${Object.entries(sm.byType || {}).map(([k, v]) => k + ' ' + v).join('、')}）・cleared ${sm.cleared}` : `VIR ${sm.defects ?? '?'} defects / ${sm.tasks ?? '?'} tasks・score ${sm.score || '—'}・${sm.status || ''}`) + (j.up ? shrinkNote(j.up) : '') });
+            if (upl) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: j.file.name, mime: 'application/pdf', size: ub.size, base64: await fileB64(ub), note: (j.parse.format === 'BSM' ? `BSM ${j.parse.defects.length} ${j.parse.mode === 'body' ? 'findings from answers (no deficiency appendix)' : 'deficiencies'} / ${sm.tasks} questions` : j.parse.format === 'SHIPSURE' ? `V.Ships Shipsure ${j.parse.defects.length} findings（${Object.entries(sm.byType || {}).map(([k, v]) => k + ' ' + v).join('、')}）・cleared ${sm.cleared}` : `VIR ${sm.defects ?? '?'} defects / ${sm.tasks ?? '?'} tasks・score ${sm.score || '—'}・${sm.status || ''}`) + (j.up ? shrinkNote(j.up) : '') });
             out.push(`${j.visitNo}：新增 ${r.added.length}${r.skipped ? '、已有 ' + r.skipped : ''}${r.updated && r.updated.length ? '（補齊 ' + r.updated.length + '）' : ''}`);
           }
           await close(); await reload();
@@ -871,6 +895,7 @@ function vVfItems(v) {
 
 /* 船舶履歷：各方（管理公司、船東、PSC、事故）觀察到的事項，依時間排列 */
 function vVfShips(v) {
+  if (S.dossier) return vDossier(v, S.dossier);
   if (S.histShip) return shipHistory(v, S.histShip);
   const cur = PSC.currentVessels(M.vessels, today()).sort((a, b) => a.vessel < b.vessel ? -1 : 1);
   const rows = cur.map(sh => { const k = String(sh.imo || sh.vessel), vis = M.visits.filter(x => String(x.imo || x.vessel) === k), its = vis.flatMap(x => x.items), stt = PSC.visitStats(its, today()), V = M.vreg[k] || {}, ins = V.insp || [], incs = M.incidents.filter(x => vkey(x) === k && !x.void);
@@ -879,6 +904,7 @@ function vVfShips(v) {
   <div class="vgrid">${rows.map(o => `<button type="button" class="vcard${o.stt.overdue ? ' risk-vl' : o.stt.open + o.stt.submitted ? ' risk-m' : ''}" data-hs="${esc(o.k)}"><span class="nm">${esc(o.sh.vessel)} <span class="dim" style="font-weight:400;font-size:12px">${esc(o.sh.chinese || '')}</span></span><span class="zh">${esc(coLabel(o.sh.company))}・PIC ${esc(o.sh.pic || '—')}</span>
     <span class="st"><span>訪船 <b class="num">${o.vis.length}</b></span><span>缺失 <b class="num">${o.stt.total}</b>${o.stt.open + o.stt.submitted ? `（未關閉 ${o.stt.open + o.stt.submitted}）` : ''}</span>${o.stt.overdue ? `<span class="flag">逾期 ${o.stt.overdue}</span>` : ''}</span><span class="st"><span>PSC <b class="num">${o.ins.length}</b> 次・${o.pdef} 項</span><span>事故 <b class="num">${o.incs.length}</b></span></span><span class="st dim">最近紀錄 ${o.last ? dfmt(o.last) : '—'}</span></button>`).join('')}</div>`;
   v.querySelectorAll('[data-hs]').forEach(b => b.addEventListener('click', () => { S.histShip = b.dataset.hs; render(); window.scrollTo({ top: 0 }); }));
+  sortableCards((v.querySelector('.vgrid > [data-hs]') || {}).parentElement, { key: 'vf-ships', attr: 'hs' });
 }
 function shipHistory(v, k) {
   const V = M.vreg[k] || {}, cur = (V.cur) || PSC.currentVessels(M.vessels, today()).find(x => String(x.imo || x.vessel) === k) || {}, name = V.name || cur.vessel || k;
@@ -900,11 +926,12 @@ function shipHistory(v, k) {
     const x = e.x; return `<li class="tl-it hv t${esc(x.tier)}"><span class="tl-dot"></span><span class="tl-date num">${dfmt(e.d)}</span><div class="tl-body"><div class="tl-head">${partyTag('INC')}${tierPill(x.tier)}<a href="#" class="mono" data-go-inc="${esc(x.tracking_no)}" style="font-size:12px">${esc(x.tracking_no)}</a><span class="stp stp-${x.status === ST.OPEN ? 'open' : 'closed'}">${esc(x.status)}</span></div><div class="tl-sum">${esc(x.summary)}</div></div></li>`;
   };
   v.innerHTML = `<button class="backlink" type="button" id="hs-back">← 回到船舶履歷</button>
-  <div class="card" style="margin-bottom:16px"><div class="vprof-head"><div><div class="eyebrow">船舶履歷</div><h2 style="font-size:20px;margin-top:2px">${esc(name)} <span class="dim" style="font-weight:400;font-size:15px">${esc(cur.chinese || V.zh || '')}</span></h2><div class="dim" style="font-size:12.5px">IMO ${esc(cur.imo || V.imo || '—')}・${esc(coLabel(cur.company))}・PIC ${esc(cur.pic || '—')}</div></div><div class="btnrow">${V.insp && V.insp.length ? '<button class="btn" type="button" id="hs-psc">PSC 船舶檔案</button>' : ''}${incs.length ? '<button class="btn" type="button" id="hs-inc">事故時間軸</button>' : ''}</div></div>
+  <div class="card" style="margin-bottom:16px"><div class="vprof-head"><div><div class="eyebrow">船舶履歷</div><h2 style="font-size:20px;margin-top:2px">${esc(name)} <span class="dim" style="font-weight:400;font-size:15px">${esc(cur.chinese || V.zh || '')}</span></h2><div class="dim" style="font-size:12.5px">IMO ${esc(cur.imo || V.imo || '—')}・${esc(coLabel(cur.company))}・PIC ${esc(cur.pic || '—')}</div></div><div class="btnrow"><button class="btn primary" type="button" id="hs-dos">單船報告（PDF／Outlook）</button>${V.insp && V.insp.length ? '<button class="btn" type="button" id="hs-psc">PSC 船舶檔案</button>' : ''}${incs.length ? '<button class="btn" type="button" id="hs-inc">事故時間軸</button>' : ''}</div></div>
   <div class="rp-ctl" style="margin-top:12px"><div class="chips"><button class="chip" type="button" data-hf="" aria-pressed="${!f}">全部 ${ev.length}</button>${Object.entries(cnt).map(([kk, n]) => `<button class="chip" type="button" data-hf="${esc(kk)}" aria-pressed="${f === kk}">${esc(kk === 'INC' ? '事故' : kk === 'PSC' ? 'PSC' : kk + ' ' + (PSC.VISIT_PARTY[kk] || ''))} ${n}</button>`).join('')}</div></div>
   ${topA.length ? `<div class="hv-areas"><span class="dim">各方最常指出的項目：</span>${topA.map(([a, n]) => `<span class="pill cat">${esc(a)} ${n}</span>`).join('')}</div>` : ''}</div>
   <div class="card">${show.length ? Object.keys(byY).sort((a, b) => b < a ? -1 : 1).map(y => `<div class="tl-year"><div class="tl-yh"><b>${esc(y)}</b><span class="dim">${byY[y].length} 筆</span></div><ol class="tl">${byY[y].map(item).join('')}</ol></div>`).join('') : '<div class="empty">沒有紀錄</div>'}</div>`;
   $('#hs-back').addEventListener('click', () => { S.histShip = null; render(); });
+  $('#hs-dos').addEventListener('click', () => { S.dossier = k; render(); window.scrollTo({ top: 0 }); });
   v.querySelectorAll('[data-hf]').forEach(b => b.addEventListener('click', () => { S.hsF = b.dataset.hf; render(); }));
   v.querySelectorAll('[data-go-visit]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); openVisit(a.dataset.goVisit); }));
   v.querySelectorAll('[data-go-insp]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); openCase(a.dataset.goInsp); }));
@@ -912,6 +939,688 @@ function shipHistory(v, k) {
   v.querySelectorAll('.hv-row[data-vi]').forEach(r => r.addEventListener('click', () => visitItemModal(r.dataset.vi)));
   const pb = $('#hs-psc'); if (pb) pb.addEventListener('click', () => openVessel(k));
   const ib = $('#hs-inc'); if (ib) ib.addEventListener('click', () => { S.incVessel = k; setTab('inc-vessels'); });
+}
+
+/* ---------- 多線趨勢圖（比較用，d3）：每條線一個對象，圖例可點選隱藏，滑過顯示該季所有數值 ---------- */
+const CMP_COLORS = ['#2f6f9f', '#c2533e', '#3f7f74', '#b8860b', '#6b4fa0', '#d0743c', '#1f8a8a', '#a03f6b'];
+/* ---------- 線圖動畫：線條依序「畫出來」，點在線畫到時跳出；電腦設定「減少動態效果」時不播放 ---------- */
+const reduceMotion = () => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+const ANIM = { dur: 1100, stagger: 260 };
+/** path：d3 選取的線；dots：同一條線上的點（可省略）；o.delay 延遲、o.dur 時間。回傳畫完的時間（毫秒） */
+function drawLineIn(svg, path, dots, o) {
+  const d3 = window.d3, node = path && !path.empty() && path.node(); o = o || {};
+  if (!d3 || !node || reduceMotion() || typeof node.getTotalLength !== 'function') return 0;
+  const L = node.getTotalLength(); if (!L || !isFinite(L)) return 0;
+  const dur = o.dur || ANIM.dur, delay = o.delay || 0, cs = getComputedStyle(node).strokeDasharray, dashed = cs && cs !== 'none';
+  if (dashed) {  // 虛線：用遮罩畫出，線本身的虛線樣式不變
+    const id = 'lm' + Math.random().toString(36).slice(2, 9), vb = String(svg.attr('viewBox') || '0 0 2000 2000').split(/\s+/).map(Number);
+    const mk = svg.append('mask').attr('id', id).attr('maskUnits', 'userSpaceOnUse').attr('x', 0).attr('y', 0).attr('width', vb[2]).attr('height', vb[3]);
+    const tag = node.tagName.toLowerCase() === 'line' ? 'line' : 'path', mp = mk.append(tag);
+    (tag === 'line' ? ['x1', 'y1', 'x2', 'y2'] : ['d']).forEach(a => mp.attr(a, path.attr(a)));
+    mp.attr('fill', 'none').attr('stroke', '#fff').attr('stroke-width', 10).attr('stroke-linecap', 'round');
+    path.attr('mask', `url(#${id})`);
+    mp.style('stroke-dasharray', `${L} ${L}`).style('stroke-dashoffset', L).transition('draw').delay(delay).duration(dur).ease(d3.easeLinear).style('stroke-dashoffset', 0)
+      .on('end interrupt', () => { path.attr('mask', null); mk.remove(); });
+  } else {
+    path.style('stroke-dasharray', `${L} ${L}`).style('stroke-dashoffset', L).transition('draw').delay(delay).duration(dur).ease(d3.easeLinear).style('stroke-dashoffset', 0)
+      .on('end interrupt', function () { d3.select(this).style('stroke-dasharray', null).style('stroke-dashoffset', null); });
+  }
+  if (dots && !dots.empty()) {
+    const N = Math.min(300, Math.max(30, Math.ceil(L / 3))), samp = [];
+    for (let i = 0; i <= N; i++) { const l = L * i / N; samp.push([node.getPointAtLength(l).x, l]); }
+    dots.each(function () {
+      const c = d3.select(this), r = c.attr('r'), cx = +c.attr('cx'); let best = samp[0];
+      for (const q of samp) if (Math.abs(q[0] - cx) < Math.abs(best[0] - cx)) best = q;
+      c.attr('r', 0).transition('draw').delay(delay + dur * best[1] / L).duration(280).ease(d3.easeBackOut.overshoot(2.2)).attr('r', r).on('interrupt', () => c.attr('r', r));
+    });
+  }
+  return delay + dur;
+}
+/* ---------- 卡片拖移排序：滑鼠直接拖、手機長按後拖（或用拖移把手）；鍵盤在卡片上按 Alt＋方向鍵。排列記在這個瀏覽器 ---------- */
+const ORDER_KEY = k => 'tsl-psc.order.' + k;
+function loadOrder(k) { S.cardOrder = S.cardOrder || {}; if (k in S.cardOrder) return S.cardOrder[k]; let v = null; try { v = JSON.parse(localStorage.getItem(ORDER_KEY(k)) || 'null'); } catch (e) { v = null; } return (S.cardOrder[k] = Array.isArray(v) ? v : null); }
+function saveOrder(k, ids) { S.cardOrder = S.cardOrder || {}; S.cardOrder[k] = ids || null; try { if (ids) localStorage.setItem(ORDER_KEY(k), JSON.stringify(ids)); else localStorage.removeItem(ORDER_KEY(k)); } catch (e) { /* 無法存在瀏覽器時，本次使用仍有效 */ } }
+/** 讓 grid 底下帶 data-<attr> 的卡片可拖移排序。o: { key, attr, handle（拖移把手，按住立即拖）, area（只能從這一區拖，例：卡片標題列）, persist（預設 true，記在瀏覽器）, onChange(ids), hint（預設 true） } */
+function sortableCards(grid, o) {
+  if (!grid || grid.dataset.sortable) return; grid.dataset.sortable = '1'; grid.classList.add('sortable');
+  const sel = `[data-${o.attr}]`, idOf = el => el.getAttribute('data-' + o.attr), items = () => [...grid.children].filter(el => el.matches(sel));
+  const saved = o.persist === false ? null : loadOrder(o.key);
+  if (saved && saved.length) { const pos = new Map(saved.map((id, i) => [id, i])), els = items(); els.slice().sort((a, b) => { const pa = pos.has(idOf(a)) ? pos.get(idOf(a)) : 1e9 + els.indexOf(a), pb = pos.has(idOf(b)) ? pos.get(idOf(b)) : 1e9 + els.indexOf(b); return pa - pb; }).forEach(el => grid.appendChild(el)); }
+  let hintEl = null;
+  if (o.hint !== false && items().length > 1) {
+    hintEl = document.createElement('div'); hintEl.className = 'sort-hint no-print';
+    hintEl.innerHTML = `<span>可拖移卡片調整排列（手機長按後拖移；鍵盤 Alt＋方向鍵）</span>${o.persist === false ? '' : '<button type="button" class="btn sm ghost" data-sort-reset hidden>恢復預設排列</button>'}`;
+    grid.before(hintEl);
+    const rb = hintEl.querySelector('[data-sort-reset]'); if (rb) { rb.hidden = !loadOrder(o.key); rb.addEventListener('click', () => { saveOrder(o.key, null); render(); }); }
+  }
+  const changed = () => { const ids = items().map(idOf); if (o.persist !== false) saveOrder(o.key, ids); if (hintEl) { const rb = hintEl.querySelector('[data-sort-reset]'); if (rb) rb.hidden = false; } if (o.onChange) o.onChange(ids); };
+  // FLIP：其他卡片平滑讓位
+  const flip = fn => { const els = items(), r0 = new Map(els.map(el => [el, el.getBoundingClientRect()])); fn(); if (reduceMotion()) return;
+    els.forEach(el => { const a = r0.get(el), b = el.getBoundingClientRect(), dx = a.left - b.left, dy = a.top - b.top; if (!dx && !dy) return; el.style.transition = 'none'; el.style.transform = `translate(${dx}px,${dy}px)`; el.getBoundingClientRect(); el.style.transition = 'transform .2s ease'; el.style.transform = ''; el.addEventListener('transitionend', () => { el.style.transition = ''; }, { once: true }); }); };
+  let drag = null, suppress = 0;
+  const start = () => {
+    const it = drag.it, r = it.getBoundingClientRect(); drag.on = true; drag.dx = drag.x0 - r.left; drag.dy = drag.y0 - r.top;
+    const g = it.cloneNode(true); g.removeAttribute('id'); g.querySelectorAll('[id]').forEach(x => x.removeAttribute('id')); g.classList.add('drag-ghost');
+    Object.assign(g.style, { width: r.width + 'px', height: r.height + 'px', left: r.left + 'px', top: r.top + 'px' }); document.body.appendChild(g); drag.ghost = g;
+    it.classList.add('drag-src'); document.body.classList.add('dragging-cards'); if (navigator.vibrate && drag.touch) try { navigator.vibrate(15); } catch (e) { /* ignore */ }
+  };
+  const finish = () => { if (!drag) return; clearTimeout(drag.t); if (drag.ghost) drag.ghost.remove(); drag.it.classList.remove('drag-src'); document.body.classList.remove('dragging-cards'); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); document.removeEventListener('touchmove', noScroll); const was = drag.on; drag = null; return was; };
+  const noScroll = e => { if (drag && drag.on) e.preventDefault(); };
+  const move = e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dist = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0);
+    if (!drag.on) { if (drag.touch && !drag.byHandle) { if (dist > 10) finish(); return; } if (dist < (drag.byHandle ? 3 : 6)) return; start(); }
+    e.preventDefault();
+    drag.ghost.style.left = (e.clientX - drag.dx) + 'px'; drag.ghost.style.top = (e.clientY - drag.dy) + 'px';
+    // 依卡片「排版後的位置」判斷指到哪一張（不看讓位動畫中的位置，避免來回跳動），越過該卡中線才換位
+    const els = items(), lay = el => { const r = el.getBoundingClientRect(); let tx = 0, ty = 0; try { const m = new DOMMatrixReadOnly(getComputedStyle(el).transform); tx = m.e; ty = m.f; } catch (x) { /* 沒有位移 */ } return { l: r.left - tx, t: r.top - ty, r: r.right - tx, b: r.bottom - ty }; };
+    const tgt = els.find(el => { if (el === drag.it) return false; const q = lay(el); return e.clientX >= q.l && e.clientX <= q.r && e.clientY >= q.t && e.clientY <= q.b; });
+    if (tgt) { const q = lay(tgt), di = els.indexOf(drag.it), ti = els.indexOf(tgt), cx = (q.l + q.r) / 2, cy = (q.t + q.b) / 2, sameRow = Math.abs(lay(drag.it).t - q.t) < 4;
+      const past = ti > di ? (sameRow ? e.clientX > cx - (q.r - q.l) * 0.15 : e.clientY > cy - (q.b - q.t) * 0.25) : (sameRow ? e.clientX < cx + (q.r - q.l) * 0.15 : e.clientY < cy + (q.b - q.t) * 0.25);
+      if (past) flip(() => { if (ti > di) tgt.after(drag.it); else tgt.before(drag.it); }); }
+    if (e.clientY < 70) window.scrollBy(0, -14); else if (e.clientY > window.innerHeight - 70) window.scrollBy(0, 14);
+  };
+  const up = e => { if (!drag || e.pointerId !== drag.id) return; if (finish()) { suppress = Date.now(); changed(); } };
+  grid.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || drag) return;
+    const it = e.target.closest(sel); if (!it || it.parentElement !== grid) return;
+    const byHandle = !!(o.handle && e.target.closest(o.handle)); if (!byHandle && o.area && !e.target.closest(o.area)) return;
+    const ctl = e.target.closest('button,a,input,select,textarea,summary,label,.tbl-wrap'); if (!byHandle && ctl && ctl !== it) return;
+    drag = { it, id: e.pointerId, x0: e.clientX, y0: e.clientY, on: false, touch: e.pointerType !== 'mouse', byHandle };
+    if (drag.touch && !byHandle) drag.t = setTimeout(() => { if (drag && !drag.on) { start(); document.addEventListener('touchmove', noScroll, { passive: false }); } }, 380);
+    if (byHandle) e.preventDefault();
+    window.addEventListener('pointermove', move, { passive: false }); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+  });
+  grid.addEventListener('click', e => { if (suppress && Date.now() - suppress < 400) { e.preventDefault(); e.stopPropagation(); suppress = 0; } }, true);
+  grid.addEventListener('contextmenu', e => { if (drag && drag.touch) e.preventDefault(); });
+  grid.addEventListener('keydown', e => {
+    const it = e.target.closest(sel); if (!it || it.parentElement !== grid) return;
+    const onHandle = o.handle && e.target.closest(o.handle), k = e.key;
+    if (!(e.altKey || onHandle) || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(k)) return;
+    e.preventDefault(); const els = items(), i = els.indexOf(it), j = k === 'ArrowLeft' || k === 'ArrowUp' ? i - 1 : i + 1; if (j < 0 || j >= els.length) return;
+    flip(() => { if (j < i) els[j].before(it); else els[j].after(it); }); (onHandle ? e.target : it).focus(); changed();
+  });
+}
+function multiLineChart(el, o) {
+  const d3 = window.d3; if (!el) return;
+  if (!d3) { el.innerHTML = '<div class="empty">圖表元件（d3）載入失敗，請確認網路可連到 cdn.jsdelivr.net。</div>'; return; }
+  const ser = (o.series || []).filter(sr => sr.points.some(p => p.v !== null && p.v !== undefined));
+  if (!ser.length) { el.innerHTML = '<div class="empty">期間內沒有資料</div>'; return; }
+  const hidden = o.hidden || (o.hidden = new Set());
+  const W = Math.max(320, el.clientWidth || 680), H = 300, m = { t: 14, r: 16, b: 26, l: 42 };
+  const all = ser.flatMap(sr => sr.points), labels = [...new Set(all.map(p => p.label))].sort();
+  const T = labels.map(l => new Date(all.find(p => p.label === l).d + 'T00:00:00Z'));
+  const x = d3.scaleUtc().domain(d3.extent(T)).range([m.l, W - m.r]);
+  const vis = ser.filter(sr => !hidden.has(sr.name));
+  const yMax = Math.max(o.baseline || 0, d3.max(vis.length ? vis : ser, sr => d3.max(sr.points, p => p.v)) || 1) * 1.15;
+  const y = d3.scaleLinear().domain([0, yMax]).nice().range([H - m.b, m.t]);
+  el.innerHTML = '';
+  const svg = d3.select(el).append('svg').attr('viewBox', `0 0 ${W} ${H}`).attr('class', 'tr-svg cmp-svg').attr('role', 'img').attr('aria-label', o.aria || '比較趨勢圖');
+  svg.append('g').attr('class', 'tr-axis').attr('transform', `translate(${m.l},0)`).call(d3.axisLeft(y).ticks(5).tickSize(-(W - m.l - m.r))).select('.domain').remove();
+  const tf = dt => dt.getUTCMonth() < 3 ? d3.utcFormat('%Y')(dt) : 'Q' + (Math.floor(dt.getUTCMonth() / 3) + 1);
+  const maxT = Math.max(2, Math.round(W / 70)), stepT = Math.ceil(T.length / maxT), tv = T.filter((t, i) => i % stepT === 0 || (stepT > 1 && t.getUTCMonth() < 3));
+  svg.append('g').attr('class', 'tr-axis').attr('transform', `translate(0,${H - m.b})`).call(d3.axisBottom(x).tickValues(tv).tickFormat(tf).tickSizeOuter(0));
+  if (o.baseline !== null && o.baseline !== undefined) { svg.append('line').attr('class', 'tr-base').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(o.baseline)).attr('y2', y(o.baseline)); svg.append('text').attr('class', 'tr-base-lbl').attr('x', W - m.r - 4).attr('y', y(o.baseline) - 5).attr('text-anchor', 'end').text(o.baseLabel || ''); }
+  const line = d3.line().defined(p => p.v !== null && p.v !== undefined).x(p => x(new Date(p.d + 'T00:00:00Z'))).y(p => y(p.v)).curve(d3.curveMonotoneX);
+  const drawn = [];
+  ser.forEach((sr, i) => {
+    if (hidden.has(sr.name)) return;
+    const g = svg.append('g').attr('class', 'cmp-line' + (sr.ref ? ' ref' : ''));
+    const path = g.append('path').attr('d', line(sr.points)).attr('fill', 'none').attr('stroke', sr.color).attr('stroke-width', sr.ref ? 1.6 : 2.2).style('stroke-dasharray', sr.ref ? '5 4' : null);
+    const dots = sr.ref ? null : g.selectAll('circle').data(sr.points.filter(p => p.v !== null && p.v !== undefined)).join('circle').attr('cx', p => x(new Date(p.d + 'T00:00:00Z'))).attr('cy', p => y(p.v)).attr('r', 2.6).attr('fill', sr.color);
+    drawn.push({ path, dots, ref: sr.ref });
+  });
+  // 線條依序畫出：每條線延遲一點開始；基準線（船隊平均）最後畫。圖例切換時不重播
+  if (!o.still) { const main = drawn.filter(d => !d.ref), st = Math.min(ANIM.stagger, 1500 / Math.max(1, main.length)); let end = 0; main.forEach((d, i) => { end = Math.max(end, drawLineIn(svg, d.path, d.dots, { delay: i * st })); }); drawn.filter(d => d.ref).forEach(d => drawLineIn(svg, d.path, null, { delay: Math.max(0, end - ANIM.dur * 0.6), dur: 900 })); }
+  const vl = svg.append('line').attr('class', 'cmp-vl').attr('y1', m.t).attr('y2', H - m.b).attr('opacity', 0);
+  svg.append('rect').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', H - m.t - m.b).attr('fill', 'transparent')
+    .on('mousemove', e => {
+      const [mx] = d3.pointer(e), t = x.invert(mx); let bi = 0; T.forEach((tt, i) => { if (Math.abs(tt - t) < Math.abs(T[bi] - t)) bi = i; });
+      const lab = labels[bi]; vl.attr('x1', x(T[bi])).attr('x2', x(T[bi])).attr('opacity', 1);
+      const rows = ser.filter(sr => !hidden.has(sr.name)).map(sr => { const p = sr.points.find(q => q.label === lab); return { sr, p }; }).filter(r => r.p).sort((a, b) => (b.p.v ?? -1) - (a.p.v ?? -1));
+      showTip(e, `<b>${esc(lab)}</b>${rows.map(r => `<div class="row"><span><i class="cmp-sw" style="background:${r.sr.color}"></i>${esc(r.sr.name)}</span><span>${r.p.v === null || r.p.v === undefined ? '—' : (o.fmt || (v => v.toFixed(2)))(r.p.v)}${r.p.n && o.nLabel ? ` <small class="dim">${r.p.n} ${o.nLabel}</small>` : ''}</span></div>`).join('')}`);
+    }).on('mouseleave', () => { vl.attr('opacity', 0); hideTip(); });
+  const lg = document.createElement('div'); lg.className = 'cmp-legend';
+  lg.innerHTML = ser.map(sr => `<button type="button" class="cmp-lg${hidden.has(sr.name) ? ' off' : ''}" data-lg="${esc(sr.name)}"><i class="cmp-sw${sr.ref ? ' ref' : ''}" style="background:${sr.color}"></i>${esc(sr.name)}</button>`).join('');
+  el.appendChild(lg);
+  lg.querySelectorAll('[data-lg]').forEach(b => b.addEventListener('click', () => { const n = b.dataset.lg; hidden.has(n) ? hidden.delete(n) : hidden.add(n); o.still = true; multiLineChart(el, o); o.still = false; }));
+}
+
+/* ---------- 船隊比較趨勢：船對船、管理公司對管理公司；可依同型、同航線、同船齡篩選 ---------- */
+const MGMT_NAME = { FLEET: 'FML', 'V-SHIP': 'V.Ships', BSM: 'BSM', SELF: '自管（TSL／TEH）' };
+function cmpState() { return S.cmp || (S.cmp = { mode: 'ship', metric: 'psc', range: '36', band: '', service: '', age: '', co: '', picks: null, cos: null, bands: null }); }
+const teuOf = v => PSC.teuBand(v, (M.settings || {}).teu_bands);
+const bandLo = b => Number((String(b).replace(/,/g, '').match(/\d+/) || ['0'])[0]);
+function bandGroups() { const g = {}; PSC.currentVessels(M.vessels, today()).forEach(v => { const b = teuOf(v); if (!b) return; (g[b] || (g[b] = [])).push(v); }); return Object.keys(g).sort((a, b) => bandLo(a) - bandLo(b)).map(b => ({ band: b, ships: g[b] })); }
+function cmpCandidates(st) {
+  return PSC.currentVessels(M.vessels, today()).filter(v => (!st.band || teuOf(v) === st.band) && (!st.service || String(v.service || '') === st.service) && (!st.age || PSC.ageBand(v.date_of_build, today()) === st.age) && (!st.co || v.company === st.co))
+    .map(v => { const k = String(v.imo || v.vessel), V = M.vreg[k] || {}; return { k, v, n: (V.insp || []).length }; }).sort((a, b) => b.n - a.n || (a.v.vessel < b.v.vessel ? -1 : 1));
+}
+function cmpHTML() {
+  const st = cmpState(), cur = PSC.currentVessels(M.vessels, today());
+  const bands = bandGroups(), services = [...new Set(cur.map(v => v.service).filter(Boolean))].sort(), ages = ['0–5 年', '5–10 年', '10–15 年', '15–20 年', '20 年以上'], cos = [...new Set(cur.map(v => v.company).filter(Boolean))].sort();
+  const cand = cmpCandidates(st); if (!st.picks) st.picks = cand.filter(c => c.n).slice(0, 4).map(c => c.k);
+  const mg = [...new Set(M.insp.map(I => I.mgmt))].filter(x => x && x !== '—').sort(); if (!st.cos) st.cos = mg.slice(); if (!st.bands) st.bands = bands.map(b => b.band);
+  return `<div class="card" id="cmp" style="margin-bottom:16px"><div class="section-head"><div><h2>比較趨勢</h2><p class="sub" style="margin:2px 0 0">同一張圖比較多艘船、各船型區間（TEU）或各管理公司。每個點是回看 4 季（12 個月）的數值，平滑季節波動；虛線為比較基準。圖例可點選隱藏，滑過看當季所有數值。</p></div>
+  <div class="btnrow"><div class="chips">${[['ship', '船對船'], ['band', '船型區間'], ['co', '管理公司']].map(([k, l]) => `<button class="chip" type="button" data-cm="${k}" aria-pressed="${st.mode === k}">${l}</button>`).join('')}</div><div class="chips">${[['psc', 'PSC 缺失比'], ['inc', '事故嚴重性']].map(([k, l]) => `<button class="chip" type="button" data-cmt="${k}" aria-pressed="${st.metric === k}">${l}</button>`).join('')}</div><div class="chips">${[['24', '近 2 年'], ['36', '近 3 年'], ['60', '近 5 年']].map(([k, l]) => `<button class="chip" type="button" data-cr="${k}" aria-pressed="${st.range === k}">${l}</button>`).join('')}</div></div></div>
+  ${st.mode === 'ship' ? `<div class="rp-ctl cmp-f"><label class="pl-sel">船型區間 <select id="cf-band">${opt('', '全部', !st.band)}${bands.map(b => opt(b.band, `${b.band}（${b.ships.length} 艘）`, st.band === b.band)).join('')}</select></label><label class="pl-sel">同航線 <select id="cf-service">${opt('', services.length ? '全部' : '（船舶主檔尚未填航線）', !st.service)}${services.map(x => opt(x, x, st.service === x)).join('')}</select></label><label class="pl-sel">同船齡 <select id="cf-age">${opt('', '全部', !st.age)}${ages.map(x => opt(x, x, st.age === x)).join('')}</select></label><label class="pl-sel">管理公司 <select id="cf-co">${opt('', '全部', !st.co)}${cos.map(x => opt(x, coLabel(x), st.co === x)).join('')}</select></label><button class="btn sm" type="button" id="cf-all">符合條件的船全部加入（最多 8 艘）</button><button class="btn sm ghost" type="button" id="cf-clear">清除</button></div>
+  <div class="cmp-picks">${cand.map(c => `<label class="cmp-pk${st.picks.includes(c.k) ? ' on' : ''}"><input type="checkbox" value="${esc(c.k)}" ${st.picks.includes(c.k) ? 'checked' : ''}> ${esc(c.v.vessel)} <small class="dim">${c.n} 次</small></label>`).join('') || '<span class="dim">沒有符合條件的船</span>'}</div>`
+    : st.mode === 'band' ? `<div class="cmp-picks">${bands.map(b => `<label class="cmp-pk${st.bands.includes(b.band) ? ' on' : ''}" title="${esc(b.ships.map(v => v.vessel).join('、'))}"><input type="checkbox" value="${esc(b.band)}" ${st.bands.includes(b.band) ? 'checked' : ''} data-band> ${esc(b.band)} <small class="dim">${b.ships.length} 艘</small></label>`).join('') || '<span class="dim">船舶主檔沒有 TEU 資料</span>'}</div>`
+    : `<div class="cmp-picks">${mg.map(c => `<label class="cmp-pk${st.cos.includes(c) ? ' on' : ''}"><input type="checkbox" value="${esc(c)}" ${st.cos.includes(c) ? 'checked' : ''} data-co> ${esc(MGMT_NAME[c] || c)}</label>`).join('')}</div>`}
+  <div class="cmp-chart"></div><div class="tbl-wrap cmp-tbl"></div></div>`;
+}
+function cmpData() {
+  const st = cmpState(), to = today(); let from = (() => { const d = new Date(to + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - Number(st.range) + 3); return d.toISOString().slice(0, 10); })();
+  const incStart = M.incidents.filter(x => !x.void && x.date).map(x => x.date).sort()[0] || '';
+  if (st.metric === 'inc' && incStart > from) from = incStart;
+  const cfg = PSC.incRiskCfg(M.settings), avg = PSC.tmouAvg(M.settings), out = [];
+  const mk = (name, insps, incs, color, extra) => { const pts = st.metric === 'psc' ? PSC.rollingPscSeries(insps, from, to, 4) : PSC.rollingIncSeries(incs, cfg, from, to, 4); if (extra && extra.div) pts.forEach(p => { if (p.v !== null) p.v = Math.round(p.v / extra.div * 100) / 100; }); return Object.assign({ name, color, points: pts, insps, incs }, extra || {}); };
+  if (st.mode === 'ship') (st.picks || []).slice(0, 8).forEach((k, i) => { const V = M.vreg[k] || {}; out.push(mk(V.name || k, V.insp || [], M.incidents.filter(x => vkey(x) === k && !x.void), CMP_COLORS[i % 8])); });
+  else if (st.mode === 'band') { const bg = bandGroups(); (st.bands || []).map(b => bg.find(x => x.band === b)).filter(Boolean).sort((a, b) => bandLo(a.band) - bandLo(b.band)).forEach((g, i) => { const ks = new Set(g.ships.map(v => String(v.imo || v.vessel))); out.push(mk(g.band, M.insp.filter(I => ks.has(vkey(I))), M.incidents.filter(x => ks.has(vkey(x)) && !x.void), CMP_COLORS[i % 8], st.metric === 'inc' ? { div: g.ships.length } : null)); }); }
+  else (st.cos || []).forEach((c, i) => { const nShips = new Set(M.insp.filter(I => I.mgmt === c).map(vkey)).size || 1; out.push(mk(MGMT_NAME[c] || c, M.insp.filter(I => I.mgmt === c), M.incidents.filter(x => x.mgmt === c && !x.void), CMP_COLORS[i % 8], st.metric === 'inc' ? { div: PSC.currentVessels(M.vessels, today()).filter(v => (PSC.COMPANY_TO_MGMT[v.company] || v.company) === c).length || nShips } : null)); });
+  const fleet = mk('船隊平均', M.insp, M.incidents.filter(x => !x.void), '#8a9a9b', Object.assign({ ref: true }, st.metric === 'inc' ? { div: PSC.currentVessels(M.vessels, today()).length || 1 } : {}));
+  return { st, from, to, series: out, fleet, avg, incStart };
+}
+function cmpRender() {
+  const card = $('#cmp'); if (!card) return;
+  const { st, from, to, series, fleet, avg, incStart } = cmpData(), psc = st.metric === 'psc';
+  multiLineChart(card.querySelector('.cmp-chart'), { series: series.concat([fleet]), baseline: psc ? avg.def : null, baseLabel: psc ? `Tokyo MOU 平均缺失指數 ${avg.def}` : '', fmt: v => psc ? v.toFixed(2) : v.toFixed(1), nLabel: psc ? '次檢查' : '', hidden: S.cmpHidden || (S.cmpHidden = new Set()) });
+  const sum = sr => { const pts = sr.points.filter(p => p.v !== null).map(p => ({ d: p.d, v: p.v, w: psc ? Math.max(1, p.n) : 1 })); const t = PSC.trendSummary(pts, from, to, psc ? avg.def : null, psc ? 0.25 : 2); const last = sr.points.filter(p => p.v !== null).pop(); return { t, last }; };
+  const rows = series.concat([fleet]).map(sr => { const o = sum(sr); const n = psc ? sr.insps.filter(I => I.date >= from).length : sr.incs.filter(x => x.date >= from).length; return { sr, o, n }; });
+  card.querySelector('.cmp-tbl').innerHTML = `<table class="rp-t"><thead><tr><th>${st.mode === 'ship' ? '船舶' : st.mode === 'band' ? '船型區間' : '管理公司'}</th><th class="n">${psc ? '檢查次數' : '事故件數'}</th><th class="n">最近 12 個月${psc ? '缺失比' : st.mode !== 'ship' ? '每船分數' : '分數'}</th><th class="n">期間平均</th><th>趨勢（每年）</th>${psc ? '<th>與 Tokyo MOU</th>' : ''}</tr></thead><tbody>${rows.map(r => `<tr${r.sr.ref ? ' class="dim"' : ''}><td><i class="cmp-sw${r.sr.ref ? ' ref' : ''}" style="background:${r.sr.color}"></i>${esc(r.sr.name)}</td><td class="n">${r.n}</td><td class="n"><b>${r.o.last ? (psc ? r.o.last.v.toFixed(2) : r.o.last.v.toFixed(1)) : '—'}</b></td><td class="n">${r.o.t.n ? (psc ? r.o.t.mean.toFixed(2) : r.o.t.mean.toFixed(1)) : '—'}</td><td>${r.o.t.n > 2 ? `<span class="tr-${r.o.t.dir}">${{ up: '↗ 上升', down: '↘ 下降', flat: '→ 持平' }[r.o.t.dir]} ${(r.o.t.slope > 0 ? '+' : '') + r.o.t.slope.toFixed(2)}</span>` : '<span class="dim">樣本不足</span>'}</td>${psc ? `<td>${r.o.t.vsBase === null || !r.o.t.n ? '—' : r.o.t.vsBase > 0 ? `<span class="flag">高 ${r.o.t.vsBase.toFixed(2)}</span>` : `<span class="vr-okt">低 ${(-r.o.t.vsBase).toFixed(2)}</span>`}</td>` : ''}</tr>`).join('')}</tbody></table>
+  <p class="note" style="margin:6px 0 0">${psc ? 'PSC 缺失比 =（ISM 缺失 × 5 ＋ 其他缺失）÷ 檢查次數，回看 4 季；該 12 個月沒有檢查的點不畫。' : `事故嚴重性 = 回看 4 季的事故分數合計${st.mode === 'co' ? '，管理公司除以目前管理船數（每船平均）' : st.mode === 'band' ? '，除以該區間目前的船數（每船平均）' : ''}；作廢不計。系統內的事故紀錄從 ${dfmt(incStart)} 開始，圖從那一季起畫。`}船隊平均為全部船舶${psc ? '' : '（每船平均）'}。${st.mode === 'band' ? `船型區間依船舶主檔的 TEU（Class 資料），只算目前在船隊的船；區間在「系統管理 → 設定 teu_bands」調整（目前 ${esc((M.settings || {}).teu_bands || '0-2000, 2000-4000, 4000-6000, 7000-')}），落在兩區間之間的船自成一組。` : ''}</p>`;
+}
+function wireCmp() {
+  const card = $('#cmp'); if (!card) return; const st = cmpState();
+  const re = patch => { Object.assign(st, patch); const html = cmpHTML(); card.outerHTML = html; wireCmp(); };
+  card.querySelectorAll('[data-cm]').forEach(b => b.addEventListener('click', () => re({ mode: b.dataset.cm })));
+  card.querySelectorAll('[data-cmt]').forEach(b => b.addEventListener('click', () => re({ metric: b.dataset.cmt })));
+  card.querySelectorAll('[data-cr]').forEach(b => b.addEventListener('click', () => re({ range: b.dataset.cr })));
+  [['#cf-band', 'band'], ['#cf-service', 'service'], ['#cf-age', 'age'], ['#cf-co', 'co']].forEach(([id, k]) => { const el = card.querySelector(id); if (el) el.addEventListener('change', () => { const p = { [k]: el.value }; const cand = cmpCandidates(Object.assign({}, st, p)); p.picks = cand.filter(c => c.n).slice(0, 8).map(c => c.k); re(p); }); });
+  const all = card.querySelector('#cf-all'); if (all) all.addEventListener('click', () => re({ picks: cmpCandidates(st).filter(c => c.n).slice(0, 8).map(c => c.k) }));
+  const clr = card.querySelector('#cf-clear'); if (clr) clr.addEventListener('click', () => re({ picks: [] }));
+  card.querySelectorAll('.cmp-picks input').forEach(c => c.addEventListener('change', () => {
+    if (c.hasAttribute('data-co')) { const set = new Set(st.cos); c.checked ? set.add(c.value) : set.delete(c.value); re({ cos: [...set] }); return; }
+    if (c.hasAttribute('data-band')) { const set = new Set(st.bands); c.checked ? set.add(c.value) : set.delete(c.value); re({ bands: [...set] }); return; }
+    const set = new Set(st.picks); if (c.checked) { if (set.size >= 8) { c.checked = false; toast('一張圖最多比較 8 艘船'); return; } set.add(c.value); } else set.delete(c.value); re({ picks: [...set] });
+  }));
+  cmpRender();
+}
+
+/* ---------- 港口／國家 PSC 分析：外部 PSC 資料庫（上傳、網址抓取、年度統計）＋本船隊紀錄 ---------- */
+const MOU_OPTS = ['Tokyo MOU', 'Paris MOU', 'Indian Ocean MOU', 'USCG', 'AMSA', 'Riyadh MOU', 'Mediterranean MOU', 'Black Sea MOU', 'Abuja MOU', 'Caribbean MOU', 'Viña del Mar', 'Other'];
+const piKey = (port, country) => `${String(port || '').toUpperCase()}|${String(country || '').toUpperCase()}`;
+const piLabel = k => { const [p, c] = k.split('|'); return p ? `${p}${c ? '（' + c + '）' : ''}` : `${c}（全國）`; };
+function piState() {
+  if (!S.pi) S.pi = { targets: [], range: '12', metric: 'idx', init: false };
+  if (!S.pi.init) { S.pi.init = true; let sv = null; try { sv = JSON.parse(localStorage.getItem('tsl-psc.pi.targets') || 'null'); } catch (e) { sv = null; } if (Array.isArray(sv) && sv.length) { S.pi.targets = sv.slice(0, 5); return S.pi; } const c = {}; M.insp.forEach(I => { const k = piKey(PSC.portMain(I.port), I.country); c[k] = (c[k] || 0) + 1; }); S.pi.targets = Object.entries(c).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]); }
+  return S.pi;
+}
+function piPlaces() {
+  const ports = {}, countries = {};
+  M.insp.forEach(I => { const p = PSC.portMain(I.port); if (p) ports[piKey(p, I.country)] = (ports[piKey(p, I.country)] || 0) + 1; if (I.country) countries[piKey('', I.country)] = (countries[piKey('', I.country)] || 0) + 1; });
+  (M.portPsc || []).forEach(r => { const p = PSC.portMain(r.port); if (p) ports[piKey(p, r.country)] = (ports[piKey(p, r.country)] || 0) + 1; if (r.country) countries[piKey('', r.country)] = (countries[piKey('', r.country)] || 0) + 1; });
+  return Object.entries(ports).concat(Object.entries(countries)).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+function piFrom(range) { if (range === 'all') return ''; const d = new Date(today() + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - Number(range)); return d.toISOString().slice(0, 10); }
+function piProfile(k, from, to, shipCodes) { const [port, country] = k.split('|'); const c2 = country || ((M.insp.find(I => PSC.portMain(I.port) === port) || {}).country) || ''; return PSC.portProfile({ port, country, mou: piMou(c2, port), from, to, ext: M.portPsc || [], own: M.insp, stats: M.portStats || [], settings: M.settings, shipCodes: shipCodes || [] }); }
+function piMou(country, port) { const h = PSC.resolveMOU(M.mouMap || [], country, port); return h && h.found ? h.mou : ''; }
+function piCardHTML(k, pr, i) {
+  const o = pr.own, e = pr.ext, n = pr.national, avg = pr.avg, mou = piMou(pr.query.country, pr.query.port);
+  const topC = pr.categories.slice(0, 6), maxC = Math.max(1, ...topC.map(c => c.total));
+  return `<div class="card pi-card" data-pik="${esc(k)}"><div class="section-head"><div><h2><button type="button" class="drag-h" aria-label="拖移排序（或按左右鍵）" title="拖移排序">⠿</button><i class="cmp-sw pi-sw" style="background:${CMP_COLORS[(i || 0) % 8]}"></i>${esc(piLabel(k))}</h2><p class="sub" style="margin:2px 0 0">${mou ? esc(mou) + '・' : ''}${pr.query.from ? dfmt(pr.query.from) + ' ~ ' : ''}${dfmt(pr.query.to || today())}</p></div><button class="btn sm ghost" type="button" data-pirm="${esc(k)}">移除</button></div>
+  <div class="kpis pi-kpis"><div class="kpi"><div class="k">本船隊檢查</div><div class="v num">${o.inspections}</div><div class="d">NIL ${o.nil}・留置 ${o.det}</div></div>
+  <div class="kpi${o.index !== null && o.index > avg.def ? ' crit' : ''}"><div class="k">本船隊缺失比</div><div class="v num">${o.index === null ? '—' : o.index.toFixed(2)}</div><div class="d">Tokyo MOU ${avg.def}・每次 ${o.perInsp === null ? '—' : o.perInsp.toFixed(1)} 項</div></div>
+  <div class="kpi"><div class="k">外部紀錄</div><div class="v num">${e.records}</div><div class="d">留置 ${e.detentions}</div></div>
+  <div class="kpi"><div class="k">${n ? esc(n.year) + ' 全國' : '全國統計'}</div><div class="v num">${n ? n.rate.toFixed(2) + '%' : '—'}</div><div class="d">${n ? `留置率・每次 ${n.defPerInsp.toFixed(2)} 項${pr.mouTotal ? `（MOU ${pr.mouTotal.rate.toFixed(2)}%）` : ''}` : '尚未匯入年度統計'}</div></div></div>
+  ${mouRefHTML(pr.mouRef, 'card')}
+  <h3 class="dos-h3">最常開出的缺失類別</h3>${topC.length ? `<div class="pi-bars">${topC.map(c => `<div class="pi-bar"><span class="pi-bl"><span class="mono">${esc(c.cat)}</span> ${esc(c.name)}</span><span class="pi-bt"><i style="width:${c.own / maxC * 100}%" class="own"></i><i style="width:${c.ext / maxC * 100}%" class="ext"></i></span><span class="num">${c.total}</span></div>`).join('')}</div><div class="pi-lg"><i class="own"></i>本船隊 <i class="ext"></i>外部資料庫</div>` : '<p class="note">期間內沒有缺失資料。</p>'}
+  <h3 class="dos-h3">常見缺失代碼</h3>${pr.codes.length ? `<div class="tbl-wrap" style="max-height:280px"><table class="rp-t"><thead><tr><th>代碼</th><th>內容（實例）</th><th class="n">本船隊</th><th class="n">外部</th><th class="n">留置</th></tr></thead><tbody>${pr.codes.slice(0, 12).map(c => `<tr><td class="mono">${esc(c.code)}</td><td style="font-size:12px">${esc(c.text || CAT[c.code.slice(0, 2)] || '')}</td><td class="n">${c.own || '·'}</td><td class="n">${c.ext || '·'}</td><td class="n">${c.det ? `<b class="flag">${c.det}</b>` : '·'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="note">—</p>'}
+  ${e.recentDet.length ? `<h3 class="dos-h3">最近留置（外部資料）</h3><div class="tbl-wrap"><table class="rp-t"><thead><tr><th>日期</th><th>船舶</th><th>船旗／船型</th><th>留置缺失</th></tr></thead><tbody>${e.recentDet.map(r => `<tr><td class="num">${dfmt(r.date)}</td><td>${esc(r.vessel || '—')}<div class="dim mono" style="font-size:11px">${esc(r.imo || '')}</div></td><td style="font-size:12px">${esc(r.flag || '')}<div class="dim">${esc(r.ship_type || '')}</div></td><td style="font-size:12px">${esc(r.codes || '')} ${esc(String(r.deficiencies || '').slice(0, 120))}</td></tr>`).join('')}</tbody></table></div>` : ''}</div>`;
+}
+function vPortIntel(v) {
+  const st = piState(), from = piFrom(st.range), to = today(), ed = can('editor');
+  const ext = M.portPsc || [], stats = M.portStats || [];
+  const bySrc = {}; ext.forEach(r => { const k = (r.mou || '—') + '｜' + (r.source || '—'); const o = bySrc[k] || (bySrc[k] = { n: 0, det: 0, last: '', batches: new Set() }); o.n++; if (r.detained === 'Y') o.det++; if (r.date > o.last) o.last = r.date; o.batches.add(r.batch); });
+  const sYears = [...new Set(stats.map(r => r.year))].sort().reverse();
+  const places = piPlaces();
+  v.innerHTML = mouCardHTML() + `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>外部 PSC 資料庫</h2><p class="sub" style="margin:2px 0 0">匯入各 MOU 或港口國公布的檢查／留置名單與年度統計，和本船隊自己的 PSC 紀錄一起分析港口與國家的檢查重點。</p></div>${ed ? '<div class="btnrow"><button class="btn primary" type="button" id="pi-imp">匯入檢查／留置紀錄</button><button class="btn" type="button" id="pi-url">從網址抓取</button><button class="btn" type="button" id="pi-stat">匯入年度統計</button></div>' : ''}</div>
+  <div class="grid g2" style="gap:14px"><div class="tbl-wrap"><table class="rp-t"><thead><tr><th>MOU｜來源</th><th class="n">紀錄</th><th class="n">留置</th><th>最新日期</th>${can('admin') ? '<th></th>' : ''}</tr></thead><tbody>${Object.entries(bySrc).map(([k, o]) => `<tr><td>${esc(k)}</td><td class="n">${fmt(o.n)}</td><td class="n">${fmt(o.det)}</td><td class="num">${dfmt(o.last)}</td>${can('admin') ? `<td>${[...o.batches].map(b => `<button class="btn sm ghost" type="button" data-pidel="${esc(b)}" title="刪除這批匯入">刪除 ${esc(b)}</button>`).join(' ')}</td>` : ''}</tr>`).join('') || `<tr><td colspan="5" class="empty">尚未匯入外部紀錄</td></tr>`}</tbody></table></div>
+  <div class="tbl-wrap"><table class="rp-t"><thead><tr><th>年度統計</th><th class="n">國家數</th><th>來源</th></tr></thead><tbody>${sYears.map(y => { const rs = stats.filter(r => r.year === y); return `<tr><td>${esc(y)}</td><td class="n">${rs.length}</td><td style="font-size:12px">${esc([...new Set(rs.map(r => (r.mou || '') + ' ' + (r.source || '')))].join('、'))}</td></tr>`; }).join('') || '<tr><td colspan="3" class="empty">尚未匯入年度統計</td></tr>'}</tbody></table></div></div>
+  <p class="note" style="margin:8px 0 0">公開來源：各國主管機關每月留置名單（日本 MLIT、香港海事處、AMSA、USCG 等）、Tokyo MOU APCIS 與 Paris MOU（EMSA THETIS）線上查詢結果。MOU 年報統計在上方「MOU 年報統計」。港口別名（例 洋山＝上海）在「系統管理 → 設定 port_aliases」。</p></div>
+  <div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>港口／國家比較</h2><p class="sub" style="margin:2px 0 0">最多 5 個港口或國家。缺失比為本船隊在該地的 PSC 檢查（回看 4 季）；留置數含外部資料。</p></div>
+  <div class="btnrow"><div class="chips">${[['12', '近 12 個月'], ['24', '近 2 年'], ['36', '近 3 年'], ['all', '全部']].map(([k, l]) => `<button class="chip" type="button" data-pr="${k}" aria-pressed="${st.range === k}">${l}</button>`).join('')}</div><div class="chips">${[['idx', '本船隊缺失比'], ['det', '留置數（每季）']].map(([k, l]) => `<button class="chip" type="button" data-pm="${k}" aria-pressed="${st.metric === k}">${l}</button>`).join('')}</div></div></div>
+  <div class="rp-ctl"><input class="inp" id="pi-q" list="pi-dl" placeholder="輸入港口或國家，例：SHANGHAI、CHINA" style="max-width:320px"><datalist id="pi-dl">${places.slice(0, 400).map(k => `<option value="${esc(piLabel(k))}"></option>`).join('')}</datalist><button class="btn" type="button" id="pi-add">加入比較</button>
+  <div class="chips">${st.targets.map(k => `<span class="chip on">${esc(piLabel(k))} <button type="button" class="chip-x" data-pirm="${esc(k)}" aria-label="移除">×</button></span>`).join('')}</div></div>
+  <div class="cmp-chart" id="pi-chart"></div></div>
+  <div class="grid g2 pi-grid">${st.targets.map((k, i) => piCardHTML(k, piProfile(k, from, to), i)).join('')}</div>`;
+  const re = () => render();
+  wireMouCard(v);
+  v.querySelectorAll('[data-pr]').forEach(b => b.addEventListener('click', () => { st.range = b.dataset.pr; re(); }));
+  v.querySelectorAll('[data-pm]').forEach(b => b.addEventListener('click', () => { st.metric = b.dataset.pm; re(); }));
+  v.querySelectorAll('[data-pirm]').forEach(b => b.addEventListener('click', () => { st.targets = st.targets.filter(x => x !== b.dataset.pirm); piSave(st); re(); }));
+  const add = () => { const val = $('#pi-q').value.trim(); if (!val) return; const k = piFind(val); if (!k) { toast('找不到這個港口或國家的紀錄'); return; } if (st.targets.includes(k)) return; if (st.targets.length >= 5) { toast('最多比較 5 個'); return; } st.targets = st.targets.concat([k]); piSave(st); re(); };
+  $('#pi-add').addEventListener('click', add); $('#pi-q').addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
+  const ib = $('#pi-imp'); if (ib) ib.addEventListener('click', () => portImportModal('records'));
+  const ub = $('#pi-url'); if (ub) ub.addEventListener('click', () => portImportModal('records', true));
+  const sb = $('#pi-stat'); if (sb) sb.addEventListener('click', () => portImportModal('stats'));
+  v.querySelectorAll('[data-pidel]').forEach(b => b.addEventListener('click', () => { if (!confirm(`刪除匯入批次 ${b.dataset.pidel}？`)) return; run(async () => { const r = await api('deletePortBatch', { batch: b.dataset.pidel }); await reload(); toast(`已刪除 ${r.deleted} 筆`); }, b); }));
+  // 比較圖（每季）；卡片拖移排序後，圖的線色與順序跟著卡片
+  const drawChart = () => {
+  const tg = st.targets, qFrom = from || (M.insp.length ? M.insp[M.insp.length - 1].date : today());
+  const series = tg.map((k, i) => { const [port, country] = k.split('|'); const q = { port, country };
+    if (st.metric === 'idx') return { name: piLabel(k), color: CMP_COLORS[i % 8], points: PSC.rollingPscSeries(M.insp.filter(I => PSC.portMatch(I.port, I.country, q)), qFrom, to, 4) };
+    const by = {}; M.insp.filter(I => I.det && PSC.portMatch(I.port, I.country, q)).forEach(I => { const l = I.date.slice(0, 4) + '-Q' + (Math.floor((+I.date.slice(5, 7) - 1) / 3) + 1); by[l] = (by[l] || 0) + 1; });
+    (M.portPsc || []).filter(r => r.detained === 'Y' && PSC.portMatch(r.port, r.country, q)).forEach(r => { const l = r.date.slice(0, 4) + '-Q' + (Math.floor((+r.date.slice(5, 7) - 1) / 3) + 1); by[l] = (by[l] || 0) + 1; });
+    return { name: piLabel(k), color: CMP_COLORS[i % 8], points: PSC.quarterList(qFrom, to).map(q2 => ({ label: q2.label, d: q2.d, v: by[q2.label] || 0 })) }; });
+  const avg = PSC.tmouAvg(M.settings);
+  multiLineChart($('#pi-chart'), { series, baseline: st.metric === 'idx' ? avg.def : null, baseLabel: `Tokyo MOU 平均缺失指數 ${avg.def}`, fmt: x => st.metric === 'idx' ? x.toFixed(2) : String(x), nLabel: st.metric === 'idx' ? '次檢查' : '' });
+  };
+  drawChart();
+  sortableCards(v.querySelector('.pi-grid'), { key: 'pi', attr: 'pik', handle: '.drag-h', area: '.section-head', persist: false, onChange: ids => { st.targets = ids; piSave(st); v.querySelectorAll('.pi-grid > [data-pik]').forEach((c, i) => { const sw = c.querySelector('.pi-sw'); if (sw) sw.style.background = CMP_COLORS[i % 8]; }); drawChart(); } });
+}
+function piSave(st) { try { localStorage.setItem('tsl-psc.pi.targets', JSON.stringify(st.targets)); } catch (e) { /* ignore */ } }
+/* ---------- MOU 年報統計（內建已核對資料、年報 PDF 匯入、每季自動檢查狀態） ---------- */
+const MOU_SHORT = { 'Tokyo MOU': 'TMOU', 'Paris MOU': 'PMOU' };
+function mouRefHTML(ref, mode, lang) {
+  if (!ref) return '';
+  const L = lang ? dosL(lang) : (zh, en) => zh, T = lang ? dosT(lang) : (zh, en) => zh, g = ref.groups.slice(0, 5), c = ref.container;
+  const txt = `${c ? `${T('全區貨櫃船', 'Container ships region-wide')}：${T('檢查', 'insp.')} ${fmt(c.inspections)}・${T('留置率', 'detention rate')} <b>${c.rate.toFixed(2)}%</b>（${T('全船型', 'all types')} ${ref.rate.toFixed(2)}%）` : `${T('全區留置率', 'Region-wide detention rate')} ${ref.rate.toFixed(2)}%`}・${T('每次檢查缺失', 'deficiencies per insp.')} ${ref.defPerInsp ? ref.defPerInsp.toFixed(2) : '—'}`;
+  const cats = g.map(x => `${lang === 'en' ? '' : esc(x.name) + ' '}${x.pct.toFixed(1)}%`).join('、');
+  if (mode === 'card') return `<div class="mou-ref"><b>${esc(ref.mou)} ${esc(ref.year)} 年報</b>・${txt}<div class="dim">最常開出：${cats}${ref.top.length ? `；最常見留置缺失：${ref.top.slice(0, 3).map(x => esc(x.zh)).join('、')}` : ''}</div></div>`;
+  return { txt, cats: g.map(x => ({ code: x.code, name: x.name, pct: x.pct, tip: x.tip })), top: ref.top.slice(0, 5) };
+}
+function mouCardHTML() {
+  const stats = M.portStats || [], latest = PSC.mouLatest(stats), set = M.settings || {}, ed = can('editor');
+  let pend = []; try { pend = set.mou_pending ? JSON.parse(set.mou_pending) : []; } catch (e) { pend = []; }
+  const builtin = PSC.MOU_DATA.filter(d => !latest[d.mou] || latest[d.mou] < d.year);
+  const refs = Object.keys(latest).sort((a, b) => (a === 'Tokyo MOU' ? -1 : b === 'Tokyo MOU' ? 1 : a < b ? -1 : 1)).map(m => PSC.mouReference(stats, m)).filter(Boolean);
+  if (!S.mouOpen) S.mouOpen = refs[0] ? refs[0].mou : '';
+  const cur = refs.find(r => r.mou === S.mouOpen) || refs[0];
+  const st = set.mou_watch_last ? `最近自動檢查 ${esc(set.mou_watch_last)} UTC${set.mou_watch_status ? `：${esc(String(set.mou_watch_status).split('\n').map(l => l.replace(/\n.*/, '')).join('；').slice(0, 300))}` : ''}` : '每季自動檢查尚未執行（後端 Apps Script 選單「安裝每季 MOU 年報檢查」）';
+  let body = '';
+  if (cur) {
+    const auth = stats.filter(r => r.mou === cur.mou && r.year === cur.year && r.kind === 'authority' && !r.ship_type).sort((a, b) => +b.detention_rate - +a.detention_rate);
+    const maxP = Math.max(1, ...cur.groups.slice(0, 10).map(x => x.pct));
+    body = `<div class="kpis pi-kpis"><div class="kpi"><div class="k">${esc(cur.year)} 檢查</div><div class="v num">${fmt(cur.inspections)}</div><div class="d">${esc(cur.mou)} 全區</div></div>
+    <div class="kpi"><div class="k">留置率</div><div class="v num">${cur.rate.toFixed(2)}%</div><div class="d">留置 ${fmt(cur.detentions)} 次</div></div>
+    <div class="kpi"><div class="k">每次檢查缺失</div><div class="v num">${cur.defPerInsp ? cur.defPerInsp.toFixed(2) : '—'}</div><div class="d">缺失 ${fmt(cur.deficiencies)} 項</div></div>
+    <div class="kpi"><div class="k">貨櫃船留置率</div><div class="v num">${cur.container ? cur.container.rate.toFixed(2) + '%' : '—'}</div><div class="d">${cur.container ? `檢查 ${fmt(cur.container.inspections)}・留置 ${cur.container.detentions}` : ''}</div></div></div>
+    <div class="grid g2" style="gap:14px"><div><h3 class="dos-h3">缺失類別（依本系統大類）</h3><div class="pi-bars">${cur.groups.slice(0, 10).map(x => `<div class="pi-bar"><span class="pi-bl"><span class="mono">${esc(x.code)}</span> ${esc(x.name)}</span><span class="pi-bt"><i class="ext" style="width:${x.pct / maxP * 100}%"></i></span><span class="num">${x.pct.toFixed(1)}%</span></div>`).join('')}</div>
+      <details class="mou-det"><summary>年報原始類別（${cur.cats.length} 類）</summary><div class="tbl-wrap" style="max-height:260px"><table class="rp-t"><thead><tr><th>類別</th><th>大類</th><th class="n">缺失</th><th class="n">%</th></tr></thead><tbody>${cur.cats.map(x => `<tr><td>${esc(x.name)}<div class="dim" style="font-size:11px">${esc(x.zh !== x.name ? x.zh : '')}</div></td><td class="mono">${esc(x.code)}</td><td class="n">${fmt(x.n)}</td><td class="n">${x.pct.toFixed(1)}</td></tr>`).join('')}</tbody></table></div><p class="note">${esc(cur.catRef || '')}</p></details></div>
+      <div>${cur.top.length ? `<h3 class="dos-h3">${esc(cur.topLabel || '最常見缺失')}</h3><ol class="mou-top">${cur.top.map(x => `<li>${esc(x.zh)}<span class="dim"> ${esc(x.zh !== x.name ? x.name : '')}</span><b class="num">${fmt(x.n)}</b></li>`).join('')}</ol>` : ''}
+      ${auth.length ? `<h3 class="dos-h3">各主管機關（依留置率）</h3><div class="tbl-wrap" style="max-height:300px"><table class="rp-t"><thead><tr><th>主管機關</th><th class="n">初次檢查</th><th class="n">每次缺失</th><th class="n">留置</th><th class="n">留置率</th></tr></thead><tbody>${auth.map(r => `<tr><td>${esc(r.country)}</td><td class="n">${fmt(r.inspections)}</td><td class="n">${(+r.deficiencies / +r.inspections).toFixed(2)}</td><td class="n">${fmt(r.detentions)}</td><td class="n${+r.detention_rate > cur.rate ? ' flag' : ''}">${(+r.detention_rate).toFixed(2)}%</td></tr>`).join('')}</tbody></table></div>` : `<p class="note">${esc(cur.mou)} 年報沒有各港口國的分項統計。</p>`}</div></div>
+    <p class="note" style="margin:8px 0 0">來源：${cur.ref ? `<a href="${esc(cur.ref)}" target="_blank" rel="noopener">${esc(cur.source)}</a>` : esc(cur.source)}。${esc(cur.note || '')}。年報資料供內部參考，註明出處。</p>`;
+  }
+  return `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>MOU 年報統計</h2><p class="sub" style="margin:2px 0 0">各 MOU 年報的全區、各主管機關、貨櫃船與缺失類別統計；匯入前逐項核對數字。${st}</p></div>
+  <div class="btnrow">${ed && builtin.length ? `<button class="btn primary" type="button" id="mou-load">載入 ${builtin.map(d => esc(d.mou + ' ' + d.year)).join('、')} 年報統計</button>` : ''}${ed ? '<button class="btn" type="button" id="mou-pdf">上傳年報 PDF</button>' : ''}${can('admin') ? '<button class="btn ghost" type="button" id="mou-now">立即檢查官網</button>' : ''}</div></div>
+  ${pend.length ? `<div class="callout" style="margin-bottom:10px">${pend.map((x, i) => `<div>★ 發現 <b>${esc(x.mou)} ${esc(x.year)}</b> 年報（${esc(x.found_at || '')} UTC）${x.checks ? `：自動核對未通過（${esc(x.checks.join('；'))}）` : x.download_error ? `：下載失敗（${esc(x.download_error)}）` : ''} ${ed ? `<button class="btn sm" type="button" data-moupend="${i}">讀取並匯入</button>` : ''} ${x.page ? `<a href="${esc(x.page)}" target="_blank" rel="noopener">官網</a>` : ''}</div>`).join('')}</div>` : ''}
+  ${refs.length > 1 ? `<div class="chips" style="margin-bottom:10px">${refs.map(r => `<button class="chip" type="button" data-mouv="${esc(r.mou)}" aria-pressed="${r.mou === (cur && cur.mou)}">${esc(r.mou)} ${esc(r.year)}</button>`).join('')}</div>` : ''}
+  ${body || '<p class="empty">尚未匯入 MOU 年報統計。</p>'}</div>`;
+}
+function wireMouCard(v) {
+  v.querySelectorAll('[data-mouv]').forEach(b => b.addEventListener('click', () => { S.mouOpen = b.dataset.mouv; render(); }));
+  const lb = v.querySelector('#mou-load'); if (lb) lb.addEventListener('click', () => run(async () => { const r = await api('loadMouData', {}); await reload(); toast(r.loaded.map(x => `${x.mou} ${x.year}：新增 ${x.added}、更新 ${x.updated} 列`).join('；'), 7000); }, lb));
+  const pb = v.querySelector('#mou-pdf'); if (pb) pb.addEventListener('click', () => mouImportModal());
+  const nb = v.querySelector('#mou-now'); if (nb) nb.addEventListener('click', () => run(async () => { const r = await api('mouWatchNow', {}); await reload(); toast(r.lines.join('；').slice(0, 300), 9000); }, nb));
+  v.querySelectorAll('[data-moupend]').forEach(b => b.addEventListener('click', () => { let pend = []; try { pend = JSON.parse(M.settings.mou_pending || '[]'); } catch (e) { pend = []; } mouImportModal(pend[+b.dataset.moupend]); }));
+}
+/** 年報 PDF → 解析 → 核對 → 匯入（上傳檔案，或讀取後端已下載的待匯入年報） */
+function mouImportModal(pending) {
+  let res = null;
+  openModal({ title: '匯入 MOU 年報統計', wide: true,
+    sub: 'Tokyo MOU 年報：讀取 Annex 2 Table 2（各主管機關）、Table 5（貨櫃船）、Table 7（缺失類別）。Paris MOU 年報：全區數字、貨櫃船、主要缺失類別。各欄加總、留置率與類別合計全部核對通過才可匯入。',
+    html: `<div class="form">${pending ? `<p>待匯入：<b>${esc(pending.mou)} ${esc(pending.year)}</b> 年報 <span class="dim mono" style="font-size:11px">${esc(pending.pdf || '')}</span></p>` : '<label class="vr-drop"><input type="file" id="mi-file" accept=".pdf,application/pdf" hidden><b>選擇年報 PDF</b><span class="dim">例：ANN25.pdf、Paris MoU Annual Report 2025.pdf</span></label>'}
+      <div class="field"><label for="mi-text">或貼上年報文字（PDF 全選複製）</label><textarea class="inp mono" id="mi-text" rows="4" placeholder="Annual Report on Port State Control in the Asia-Pacific Region 2025 …"></textarea></div>
+      <div id="mi-prog" class="dim"></div><div id="mi-out"></div><div id="mi-err" class="err"></div></div>`,
+    foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="mi-go" disabled>匯入</button>`,
+    onMount(root, close) {
+      const q = x => root.querySelector(x), go = q('#mi-go'); q('[data-close]').addEventListener('click', close);
+      const show = text => {
+        res = PSC.parseMouAnnual(text, pending ? { mou: pending.mou, year: pending.year, url: pending.pdf } : {});
+        const d = res.ds, t = d.total || {};
+        q('#mi-out').innerHTML = `<h3 class="dos-h3">${esc(d.mou)} ${esc(d.year || '?')}</h3><ul class="vr-checks">${res.checks.map(c => `<li class="${c.ok ? 'ok' : 'ng'}">${c.ok ? '✓' : '✗'} ${esc(c.what)}</li>`).join('')}</ul>
+          <p class="note">全區：檢查 ${t.inspections ? fmt(t.inspections) : '—'}・缺失 ${t.deficiencies ? fmt(t.deficiencies) : '—'}・留置 ${t.detentions !== undefined ? fmt(t.detentions) : '—'}（${t.detention_rate || '—'}%）・主管機關 ${d.authorities.length}・缺失類別 ${d.categories.length}・貨櫃船 ${d.shipTypes.length ? d.shipTypes[0].detention_rate + '%' : '—'}</p>
+          ${res.ok ? '' : '<div class="callout">核對未通過，不匯入。可能是 PDF 文字排列不同或網站改版；請把檔案交給系統管理員確認。</div>'}`;
+        go.disabled = !res.ok; go.textContent = res.ok ? `匯入 ${d.mou} ${d.year}` : '核對未通過';
+      };
+      const fromBytes = async (u, name) => { q('#mi-prog').textContent = '讀取 PDF…'; const pages = await pdfTextPages(new File([u], name || 'report.pdf'), (i, n) => { q('#mi-prog').textContent = `讀取 PDF 第 ${i} / ${n} 頁`; }); q('#mi-prog').textContent = `已讀取 ${pages.length} 頁`; show(PSC.pagesToText(pages)); };
+      const b64u = b => { const bin = atob(b), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+      const fi = q('#mi-file'); if (fi) fi.addEventListener('change', () => { const f = fi.files[0]; if (f) run(async () => fromBytes(new Uint8Array(await f.arrayBuffer()), f.name)); });
+      q('#mi-text').addEventListener('input', () => { const t = q('#mi-text').value; if (t.length > 200) show(t); });
+      if (pending) run(async () => { const r = pending.file_id ? await api('mouPdf', { file_id: pending.file_id }) : await api('fetchUrl', { url: pending.pdf }); if (!r.base64) throw new Error('抓到的不是 PDF（' + (r.contentType || '') + '）'); await fromBytes(b64u(r.base64), r.name); });
+      go.addEventListener('click', () => run(async () => { const r = await api('importMouAnnual', { ds: res.ds }); await close(); await reload(); toast(`${res.ds.mou} ${res.ds.year} 年報統計：新增 ${r.added}、更新 ${r.updated} 列`, 7000); }, go));
+    } });
+}
+function piFind(val) {
+  const t = val.replace(/（全國）$/, '').replace(/[（(].*$/, '').trim().toUpperCase(), places = piPlaces();
+  const exact = places.find(k => piLabel(k).toUpperCase() === val.toUpperCase()); if (exact) return exact;
+  const main = PSC.portMain(t), byPort = places.find(k => k.split('|')[0] === main); if (byPort) return byPort;
+  const byC = places.find(k => !k.split('|')[0] && k.split('|')[1] === t); return byC || null;
+}
+/* ---------- 匯入：檔案（CSV／TSV／Excel／HTML）、貼上表格、網址（後端抓取） ---------- */
+let xlsxP = null;
+function loadXlsx() { if (window.XLSX) return Promise.resolve(window.XLSX); return xlsxP || (xlsxP = new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'; sc.onload = () => window.XLSX ? res(window.XLSX) : (xlsxP = null, rej(new Error('Excel 讀取元件載入失敗'))); sc.onerror = () => { xlsxP = null; rej(new Error('無法載入 Excel 讀取元件，請確認網路可連到 cdnjs.cloudflare.com')); }; document.head.appendChild(sc); })); }
+function htmlTables(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  return [...doc.querySelectorAll('table')].map(t => [...t.querySelectorAll('tr')].map(tr => [...tr.querySelectorAll('th,td')].map(td => td.textContent.replace(/\s+/g, ' ').trim()))).filter(rows => rows.length > 1).sort((a, b) => b.length - a.length);
+}
+async function rowsFromFile(f) {
+  if (/\.(xlsx|xls|xlsm|ods)$/i.test(f.name)) { const X = await loadXlsx(); const wb = X.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellDates: true }); const sh = wb.Sheets[wb.SheetNames[0]]; return X.utils.sheet_to_json(sh, { header: 1, raw: false, dateNF: 'yyyy-mm-dd', defval: '' }); }
+  const txt = await f.text();
+  if (/<table/i.test(txt)) { const t = htmlTables(txt); if (t.length) return t[0]; }
+  return PSC.parseDelimited(txt);
+}
+function portImportModal(kind, urlMode) {
+  const stats = kind === 'stats'; let rows = [], map = null;
+  const FIELDS = [['', '（不匯入）'], ['date', '日期'], ['port', '港口'], ['country', '國家／主管機關'], ['vessel', '船名'], ['imo', 'IMO'], ['flag', '船旗'], ['ship_type', '船型'], ['ro', '船級／RO'], ['detained', '是否留置'], ['def_count', '缺失數'], ['codes', '缺失代碼'], ['deficiencies', '缺失內容'], ['company', '公司'], ['mou', 'MOU']];
+  openModal({ title: stats ? '匯入年度統計' : urlMode ? '從網址抓取 PSC 名單' : '匯入檢查／留置紀錄', wide: true,
+    sub: stats ? '例：Tokyo MOU 年報 Annex 2 Table 2（各主管機關：檢查數、有缺失檢查數、缺失數、留置數、留置率）。從 PDF 或網頁複製表格貼上即可；留置率和數字不符的列會被擋下。' : '來源可為 Tokyo MOU／各國的留置名單、檢查紀錄匯出檔。系統自動辨識欄位，可手動調整；同一艘船同一天同港口的紀錄不會重複建立。',
+    html: `<div class="form"><div class="frow"><div class="field"><label for="pm-src">來源名稱</label><input class="inp" id="pm-src" placeholder="${stats ? 'Tokyo MOU Annual Report 2025' : 'Tokyo MOU detention list 2026-09'}"></div><div class="field"><label for="pm-mou">MOU</label><select id="pm-mou">${MOU_OPTS.map(x => opt(x, x, x === 'Tokyo MOU')).join('')}</select></div>${stats ? `<div class="field"><label for="pm-year">年度</label><input class="inp" id="pm-year" inputmode="numeric" value="${new Date().getFullYear() - 1}"></div>` : `<div class="field"><label for="pm-cty">預設國家（檔案沒有國家欄時）</label><input class="inp" id="pm-cty" placeholder="CHINA"></div>`}</div>
+    ${stats ? '' : '<label class="pl-sel"><input type="checkbox" id="pm-det"> 這份是留置名單（每一筆都是留置）</label>'}
+    ${urlMode ? `<div class="frow"><div class="field" style="grid-column:span 3"><label for="pm-url">網址（https）</label><input class="inp" id="pm-url" placeholder="https://… 留置名單頁面、CSV 或 Excel 檔"></div><div class="field"><label>&nbsp;</label><button class="btn" type="button" id="pm-fetch">抓取</button></div></div><p class="note" style="margin:0">由後端（Apps Script）抓取，回傳網頁中的表格或 CSV／Excel 內容。PDF 名單請下載後複製表格貼上。</p>`
+      : `<label class="vr-drop"><input type="file" id="pm-file" accept=".csv,.tsv,.txt,.xlsx,.xls,.html,.htm" hidden><b>選擇檔案</b><span class="dim">CSV、TSV、Excel、HTML 表格</span></label><div class="field"><label for="pm-text">或貼上表格（從網頁、Excel 或 PDF 複製，第一列為欄名）</label><textarea class="inp mono" id="pm-text" rows="6" placeholder="${stats ? 'Authority\tInspections\tInspections with deficiencies\tDeficiencies\tDetentions\tDetention %' : 'Ship name\tIMO\tFlag\tType\tDate of detention\tPlace of detention\tNature of deficiencies'}"></textarea></div>`}
+    <div id="pm-map"></div><div id="pm-prev"></div><div id="pm-err" class="err"></div></div>`,
+    foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="pm-go" disabled>匯入</button>`,
+    onMount(root, close) {
+      const q = s2 => root.querySelector(s2), go = q('#pm-go'); root.querySelector('[data-close]').addEventListener('click', close);
+      const opts = () => ({ source: q('#pm-src').value.trim(), mou: q('#pm-mou').value, detained: q('#pm-det') && q('#pm-det').checked ? 'Y' : '', country: q('#pm-cty') ? q('#pm-cty').value.trim() : '', year: q('#pm-year') ? q('#pm-year').value.trim() : '' });
+      let parsed = null;
+      const preview = () => {
+        q('#pm-err').textContent = '';
+        if (!rows.length) { q('#pm-map').innerHTML = ''; q('#pm-prev').innerHTML = ''; go.disabled = true; return; }
+        if (stats) {
+          parsed = PSC.statsFromRows(rows, opts());
+          q('#pm-prev').innerHTML = `<div class="tbl-wrap" style="max-height:300px"><table class="rp-t"><thead><tr><th>國家／主管機關</th><th class="n">檢查</th><th class="n">有缺失</th><th class="n">缺失</th><th class="n">留置</th><th class="n">留置率</th></tr></thead><tbody>${parsed.stats.map(r => `<tr><td>${esc(r.country)}</td><td class="n">${fmt(r.inspections)}</td><td class="n">${r.with_def ? fmt(r.with_def) : '—'}</td><td class="n">${fmt(r.deficiencies)}</td><td class="n">${fmt(r.detentions)}</td><td class="n">${esc(r.detention_rate)}%</td></tr>`).join('')}</tbody></table></div>${parsed.rejected.length ? `<div class="callout" style="margin-top:8px">有 ${parsed.rejected.length} 列數字不一致，未匯入：${parsed.rejected.map(b => esc(b.name + '（' + b.why + '）')).join('；')}</div>` : ''}<p class="note">讀到 ${parsed.stats.length} 列。</p>`;
+          go.disabled = !parsed.stats.length || !opts().year; go.textContent = `匯入 ${parsed.stats.length} 列`; return;
+        }
+        if (!map) map = PSC.guessPortColumns(rows[0]);
+        const inv = {}; Object.entries(map).forEach(([k, i]) => { inv[i] = k; });
+        q('#pm-map').innerHTML = `<div class="pm-cols">${rows[0].map((h, i) => `<label class="pm-col"><span title="${esc(h)}">${esc(String(h).slice(0, 28) || '（第 ' + (i + 1) + ' 欄）')}</span><select data-ci="${i}">${FIELDS.map(([f, l]) => opt(f, l, (inv[i] || '') === f)).join('')}</select></label>`).join('')}</div>`;
+        q('#pm-map').querySelectorAll('[data-ci]').forEach(sel => sel.addEventListener('change', () => { const i = +sel.dataset.ci; Object.keys(map).forEach(k => { if (map[k] === i) delete map[k]; }); if (sel.value) map[sel.value] = i; preview(); }));
+        parsed = PSC.portRecordsFrom(rows.slice(1), Object.assign(opts(), { map }));
+        const need = map.date === undefined ? '請指定「日期」欄' : map.port === undefined && map.country === undefined && !opts().country ? '請指定「港口」或「國家」欄' : '';
+        q('#pm-prev').innerHTML = `${need ? `<div class="callout">${need}</div>` : ''}<div class="tbl-wrap" style="max-height:300px"><table class="rp-t"><thead><tr><th>日期</th><th>港口</th><th>國家</th><th>船舶</th><th>船旗／船型</th><th>留置</th><th>缺失</th></tr></thead><tbody>${parsed.records.slice(0, 12).map(r => `<tr><td class="num">${dfmt(r.date)}</td><td>${esc(r.port)}</td><td>${esc(r.country)}</td><td>${esc(r.vessel)}<div class="dim mono" style="font-size:11px">${esc(r.imo)}</div></td><td style="font-size:12px">${esc(r.flag)}<div class="dim">${esc(r.ship_type)}</div></td><td>${r.detained === 'Y' ? '<b class="flag">Y</b>' : esc(r.detained || '—')}</td><td style="font-size:12px">${esc(r.def_count || '')} ${esc(r.codes)}</td></tr>`).join('')}</tbody></table></div><p class="note">讀到 ${parsed.records.length} 筆${parsed.skipped.length ? `，略過 ${parsed.skipped.length} 列（${esc(parsed.skipped.slice(0, 5).map(x => '第 ' + x.row + ' 列' + x.why).join('、'))}…）` : ''}。</p>`;
+        go.disabled = !!need || !parsed.records.length; go.textContent = `匯入 ${parsed.records.length} 筆`;
+      };
+      const setRows = r => { rows = (r || []).filter(x => x && x.some(c => String(c).trim())); map = null; preview(); };
+      const fi = q('#pm-file'); if (fi) fi.addEventListener('change', () => { const f = fi.files[0]; if (!f) return; run(async () => { setRows(await rowsFromFile(f)); if (!q('#pm-src').value) q('#pm-src').value = f.name.replace(/\.[^.]+$/, ''); }); });
+      const tx = q('#pm-text'); if (tx) tx.addEventListener('input', () => { const t = tx.value; setRows(/<table/i.test(t) ? (htmlTables(t)[0] || []) : PSC.parseDelimited(t)); });
+      const fb = q('#pm-fetch'); if (fb) fb.addEventListener('click', () => run(async () => {
+        const url = q('#pm-url').value.trim(); if (!/^https:\/\//i.test(url)) { q('#pm-err').textContent = '請輸入 https 開頭的網址'; return; }
+        const r = await api('fetchUrl', { url });
+        if (r.base64) { const bin = atob(r.base64), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); const name = /sheet|excel|xls/i.test(r.contentType) ? 'f.xlsx' : 'f.bin'; if (!/xlsx/.test(name)) throw new Error('抓到的是 ' + r.contentType + '，目前只支援網頁表格、CSV 與 Excel'); setRows(await rowsFromFile(new File([u], name))); }
+        else { const t = htmlTables(r.text); setRows(t.length ? t[0] : PSC.parseDelimited(r.text)); if (!rows.length) q('#pm-err').textContent = '這個網址的內容裡找不到表格（可能是動態載入或 PDF），請改用下載後貼上'; }
+        if (!q('#pm-src').value) q('#pm-src').value = url.replace(/^https:\/\//, '').slice(0, 60);
+      }, fb));
+      ['#pm-mou', '#pm-det', '#pm-cty', '#pm-year', '#pm-src'].forEach(id => { const el = q(id); if (el) el.addEventListener('change', preview); });
+      go.addEventListener('click', () => run(async () => {
+        const o = opts(); if (!o.source) { q('#pm-err').textContent = '請填來源名稱（之後可依來源整批刪除）'; return; }
+        if (stats) { const r = await api('importPortStats', { stats: parsed.stats.map(x => Object.assign(x, { source: o.source, mou: o.mou, year: o.year })) }); await close(); await reload(); toast(`年度統計：新增 ${r.added}、更新 ${r.updated}`); return; }
+        const recs = parsed.records.map(x => Object.assign(x, { source: o.source, mou: x.mou || o.mou })), batch = 'B' + new Date().toISOString().replace(/\D/g, '').slice(2, 14);
+        let a = 0, u2 = 0, sk = 0; for (let i = 0; i < recs.length; i += 400) { go.textContent = `匯入中 ${Math.min(i + 400, recs.length)} / ${recs.length}`; const r = await api('importPortPsc', { records: recs.slice(i, i + 400), source: o.source, mou: o.mou, batch }); a += r.added; u2 += r.updated; sk += r.skipped; }
+        await close(); await reload(); toast(`外部 PSC 紀錄：新增 ${a}、補齊 ${u2}、重複略過 ${sk}（批次 ${batch}）`, 7000);
+      }, go));
+    } });
+}
+/* ---------- 單船報告：前往港口的 PSC 重點 ---------- */
+function dosDestProfiles(d, st) {
+  const shipCodes = [...new Set((d._allIns || []).flatMap(I => (I.defs || []).map(x => String(x.code || ''))).filter(Boolean))];
+  return (st.dest || []).map(k => { let from = piFrom('12'), pr = piProfile(k, from, today(), shipCodes); if (pr.own.inspections + pr.ext.records < 5) { from = piFrom('36'); pr = piProfile(k, from, today(), shipCodes); pr.widened = true; } pr.key = k; const [port, country] = k.split('|'); pr.mou = piMou(country || (pr.own.recent[0] && pr.own.recent[0].country) || '', port); return pr; });
+}
+/** 前往港口的備檢類別：此港本船隊＋外部紀錄少於 3 類時，改用該 MOU 年報的全區類別 */
+function dosDestCats(pr) {
+  const own = pr.categories.slice(0, 5);
+  if (own.length >= 3 || !pr.mouRef || !pr.mouRef.groups.length) return own;
+  const c = pr.mouRef.groups.slice(0, 5).map(g => ({ cat: g.code, name: g.name, total: g.n, pct: g.pct, ext: 0, tip: g.tip })); c.fromMou = true; return c;
+}
+function dosDestHTML(dests, d, lang) {
+  if (!dests.length) return '';
+  const L = dosL(lang), T = dosT(lang);
+  return `<h2 class="rp-h">${L('前往港口 PSC 重點', 'PSC focus at the next port(s)', 1)}</h2>${dests.map(pr => { const o = pr.own, e = pr.ext, n = pr.national, cats = dosDestCats(pr), codes = pr.codes.slice(0, 8);
+    return `<div class="dos-dest"><h3 class="dos-h3">${esc(piLabel(pr.key))}${pr.mou ? `・${esc(pr.mou)}` : ''} <span class="dim" style="font-weight:400">${T('統計期間', 'Period')} ${dfmt(pr.query.from)} ~ ${dfmt(pr.query.to)}${pr.widened ? T('（近 12 個月資料不足，改用 36 個月）', ' (36 months; too few records in 12 months)') : ''}</span></h3>
+    <div class="tbl-wrap"><table class="rp-t"><tbody><tr><th>${L('本船隊在此港檢查', 'TSL fleet inspections here')}</th><td>${o.inspections} ${T('次', 'insp.')}・NIL ${o.nil}・${T('留置', 'detained')} ${o.det}${o.index !== null ? `・${T('缺失比', 'deficiency index')} <b>${o.index.toFixed(2)}</b>（Tokyo MOU ${pr.avg.def}）` : ''}</td></tr>
+    <tr><th>${L('外部資料（各船）', 'External records (all ships)')}</th><td>${e.records} ${T('筆', 'records')}・${T('留置', 'detentions')} ${e.detentions}</td></tr>
+    ${n ? `<tr><th>${L(n.year + ' 全國統計', n.year + ' national statistics')}</th><td>${T('檢查', 'Inspections')} ${fmt(n.inspections)}・${T('留置率', 'Detention rate')} <b>${n.rate.toFixed(2)}%</b>${pr.mouTotal ? `（${T('MOU 平均', 'MOU avg')} ${pr.mouTotal.rate.toFixed(2)}%）` : ''}・${T('每次檢查', 'per insp.')} ${n.defPerInsp.toFixed(2)} ${T('項缺失', 'def.')}</td></tr>` : ''}
+    ${pr.mouRef ? (m => `<tr><th>${L(pr.mouRef.mou + ' ' + pr.mouRef.year + ' 年報', pr.mouRef.mou + ' ' + pr.mouRef.year + ' annual report')}</th><td>${m.txt}<div style="font-size:11.5px">${T('全區最常開出', 'Most frequent region-wide')}：${m.cats.map(x => `${lang === 'en' ? '' : esc(x.name) + ' '}${x.pct.toFixed(1)}%`).join('、')}${m.top.length ? `<br>${T(pr.mouRef.mou === 'Tokyo MOU' ? '最常見留置缺失' : '最常見缺失', pr.mouRef.mou === 'Tokyo MOU' ? 'Most frequent detainable deficiencies' : 'Most frequent deficiencies')}：${m.top.map(x => lang === 'en' ? esc(x.name) : lang === 'zh' ? esc(x.zh) : esc(x.zh) + (x.zh !== x.name ? ' ' + esc(x.name) : '')).join('、')}` : ''}</div></td></tr>`)(mouRefHTML(pr.mouRef, 'data', lang)) : ''}</tbody></table></div>
+    ${cats.length ? `<p class="dos-sub"><b>${cats.fromMou ? L(pr.mouRef.mou + ' 全區最常開出的缺失類別與備檢重點（此港紀錄不足）', 'Most frequent deficiency areas in ' + pr.mouRef.mou + ' and what to check (few records at this port)', 1) : L('此港最常開出的缺失類別與備檢重點', 'Most frequent deficiency areas and what to check', 1)}</b></p><ol class="dos-tips">${cats.map(c => `<li><b>${esc(c.cat)} ${lang === 'en' ? '' : esc(c.name)}</b>（${c.pct !== undefined ? c.pct.toFixed(1) + '%' : c.total}${c.ext ? ` ${T('含外部', 'incl. external')} ${c.ext}` : ''}）${lang !== 'en' ? `<div>${esc(c.tip[0])}</div>` : ''}${lang !== 'zh' ? `<div class="${lang === 'both' ? 'en-b' : ''}">${esc(c.tip[1])}</div>` : ''}</li>`).join('')}</ol>` : `<p class="note">${T('期間內此港沒有缺失紀錄。', 'No deficiency recorded at this port in the period.')}</p>`}
+    ${codes.length ? `<div class="tbl-wrap"><table class="rp-t"><thead><tr><th>${L('代碼', 'Code')}</th><th>${L('實例', 'Example')}</th><th class="n">${L('次數', 'Count')}</th><th class="n">${L('留置', 'Det.')}</th></tr></thead><tbody>${codes.map(c => `<tr${c.ship ? ' class="dos-over"' : ''}><td class="mono">${esc(c.code)}${c.ship ? ' ★' : ''}</td><td style="font-size:11.5px">${esc(c.text || CAT[c.code.slice(0, 2)] || '')}</td><td class="n">${c.total}</td><td class="n">${c.det || '·'}</td></tr>`).join('')}</tbody></table></div><p class="note dos-note">★ ${T('本船過去也被開過的缺失代碼，請優先自我檢查。', 'Codes this vessel has also received before — check these first.')}</p>` : ''}</div>`; }).join('')}`;
+}
+
+/* ---------- 單船綜合報告（船舶履歷 → 單船報告）：期間內事故、PSC、訪船＋Tokyo MOU 窗口、風險評估、趨勢；列印 PDF／複製到 Outlook ---------- */
+const DOS_PRESETS = [['12', '近 12 個月', 'Last 12 months'], ['24', '近 24 個月', 'Last 24 months'], ['36', '近 36 個月', 'Last 36 months'], ['60', '近 5 年', 'Last 5 years'], ['all', '全部', 'All records'], ['custom', '自訂', 'Custom']];
+const DOS_LV_CLS = { H: 'vl', E: 'l', M: 'm', L: 'h' };
+const DOS_ATT = { high: { c: 'vl', zh: '重要', en: 'Priority' }, med: { c: 'm', zh: '注意', en: 'Attention' }, info: { c: 'h', zh: '提醒', en: 'Note' } };
+function dosMonthsAgo(n) { const d = new Date(today() + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - Number(n)); return d.toISOString().slice(0, 10); }
+function dosState(k) {
+  if (!S.dos || S.dos.k !== k) S.dos = { k, preset: '36', from: dosMonthsAgo(36), to: today(), lang: S.dosLang || 'both', dest: [] };
+  return S.dos;
+}
+function dosData(k, st) {
+  const V = M.vreg[k] || {}, cur = V.cur || PSC.currentVessels(M.vessels, today()).find(x => String(x.imo || x.vessel) === k) || { vessel: V.name || k, imo: V.imo };
+  const d = PSC.shipDossier({ from: st.preset === 'all' ? '' : st.from, to: st.to, today: today(), settings: M.settings, vessel: cur, formerNames: (V.former || []).filter(n => String(n).toUpperCase() !== String(cur.vessel || '').toUpperCase()),
+    inspections: V.insp || [], rawInspections: RAW.inspections, vesselsRows: M.vessels, riskProfiles: M.risk, nkStatus: M.nk,
+    incidents: M.incidents.filter(x => vkey(x) === k), visits: M.visits.filter(x => String(x.imo || x.vessel) === k), rightship: (M.rightship || []).filter(r => String(r.imo) === String(cur.imo)) });
+  d._allIns = V.insp || []; d.dests = dosDestProfiles(d, st);
+  const w = d.window, wp = w ? w.priority : '', extra = [];
+  d.dests.forEach(pr => {
+    const lab = piLabel(pr.key);
+    if (pr.mou === 'Tokyo MOU' && (wp === 'I' || wp === 'II' || (w && w.opening_soon))) extra.push({ level: 'high', zh: `前往 ${lab}（Tokyo MOU）時本船${wp === 'I' ? '已過檢查窗口（Priority I）' : wp === 'II' ? '在檢查窗口內（Priority II）' : '檢查窗口即將開啟'}，被 PSC 登輪的機率高；請依「前往港口 PSC 重點」完成自我檢查。`, en: `Calling ${lab} (Tokyo MOU) while ${wp === 'I' ? 'past the inspection window (Priority I)' : wp === 'II' ? 'within the inspection window (Priority II)' : 'the inspection window is about to open'}: PSC boarding is likely. Complete a self-check using the port PSC focus below.` });
+    if (pr.shipOverlap.length) extra.push({ level: 'med', zh: `${lab} 常見、且本船過去也被開過的缺失：${pr.shipOverlap.slice(0, 5).map(c => c.code).join('、')}，請優先檢查。`, en: `Deficiencies frequent at ${lab} that this vessel has also received before: ${pr.shipOverlap.slice(0, 5).map(c => c.code).join(', ')}. Check these first.` });
+  });
+  if (extra.length) d.attention = extra.concat(d.attention);
+  return d;
+}
+/** 中英字串：zh／en／both */
+const dosL = lang => (zh, en, inline) => lang === 'zh' || zh === en ? zh : lang === 'en' ? en : inline ? `${zh} <span class="en">${en}</span>` : `${zh}<span class="en-b">${en}</span>`;
+const dosT = lang => (zh, en) => lang === 'zh' || zh === en ? zh : lang === 'en' ? en : zh + ' ' + en;
+/** 靜態 SVG 趨勢圖（列印與信件用，不依賴 d3） */
+function dosSvg(kind, d, lang, W) {
+  W = W || 720; const H = 256, m = { t: 40, r: 18, b: 30, l: 40 }, iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const from = d.period.from, to = d.period.to, t0 = Date.parse(from + 'T00:00:00Z'), t1 = Math.max(Date.parse(to + 'T00:00:00Z'), t0 + 864e5);
+  const X = ds => m.l + (Date.parse(ds + 'T00:00:00Z') - t0) / (t1 - t0) * iw;
+  const T = dosT(lang), f2 = v => (Math.round(v * 100) / 100).toString();
+  let pts, base, baseLbl, yMax, body = '';
+  const yrTicks = () => { let out = ''; const y0 = +from.slice(0, 4), y1 = +to.slice(0, 4); const span = (t1 - t0) / 864e5; for (let y = y0; y <= y1 + 1; y++) for (const mo of span > 800 ? [1] : span > 300 ? [1, 7] : [1, 4, 7, 10]) { const ds = `${y}-${String(mo).padStart(2, '0')}-01`; if (ds < from || ds > to) continue; const x = X(ds); out += `<line x1="${x}" x2="${x}" y1="${m.t + ih}" y2="${m.t + ih + 4}" stroke="#8a9a9b"/><text x="${x}" y="${H - 10}" font-size="10.5" text-anchor="middle" fill="#5b6a6b">${mo === 1 ? y : y + '/' + String(mo).padStart(2, '0')}</text>`; } return out; };
+  if (kind === 'psc') {
+    pts = d.trends.pscPoints.filter(p => p.d >= from && p.d <= to); base = d.psc.avg.def; baseLbl = T('Tokyo MOU 平均缺失指數', 'Tokyo MOU avg deficiency index') + ' ' + base;
+    yMax = Math.max(base * 1.4, ...pts.map(p => p.v), 1) * 1.1;
+  } else {
+    pts = d.trends.incPoints.filter(p => { const y = +p.label.slice(0, 4), k = +p.label.slice(-1), qs = `${y}-${String((k - 1) * 3 + 1).padStart(2, '0')}-01`, qe = `${y}-${String(k * 3).padStart(2, '0')}-28`; return qe >= from && qs <= to; }).map(p => Object.assign({}, p, { d: p.d < from ? from : p.d > to ? to : p.d }));
+    base = d.trends.incAvg; baseLbl = base !== null ? T('全期季平均', 'All-time quarterly avg') + ' ' + f2(base) : '';
+    yMax = Math.max((base || 0) * 1.4, ...pts.map(p => p.v), 4) * 1.1;
+  }
+  const Y = v => m.t + ih - v / yMax * ih;
+  const step = yMax > 40 ? 10 : yMax > 16 ? 5 : yMax > 6 ? 2 : 1;
+  for (let v = 0; v <= yMax; v += step) body += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e3e8e3"/><text x="${m.l - 6}" y="${Y(v) + 3.5}" font-size="10.5" text-anchor="end" fill="#5b6a6b">${v}</text>`;
+  body += yrTicks();
+  if (kind === 'inc') {
+    const bw = Math.max(4, Math.min(28, iw / Math.max(pts.length, 1) * 0.6));
+    pts.forEach(p => { const x = X(p.d), h = m.t + ih - Y(p.v); if (p.v > 0) body += `<rect x="${x - bw / 2}" y="${Y(p.v)}" width="${bw}" height="${h}" rx="2" fill="${base !== null && p.v > base ? '#c2533e' : '#3f7f74'}"><title>${p.label} ${p.n} / ${p.v}</title></rect><text x="${x}" y="${Y(p.v) - 4}" font-size="10" text-anchor="middle" fill="#2b3a3b">${f2(p.v)}</text>`; });
+  } else if (pts.length) {
+    const roll = pts.map((p, i) => { const w = pts.slice(Math.max(0, i - 2), i + 1); return w.reduce((a, b) => a + b.v, 0) / w.length; });
+    if (pts.length > 1) body += `<polyline fill="none" stroke="#3f7f74" stroke-width="2" points="${pts.map((p, i) => `${X(p.d).toFixed(1)},${Y(roll[i]).toFixed(1)}`).join(' ')}"/>`;
+    pts.forEach(p => { body += `<circle cx="${X(p.d).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="3.6" fill="${p.v > base ? '#c2533e' : '#3f7f74'}" stroke="#fff" stroke-width="1"><title>${p.d} ${f2(p.v)}</title></circle>`; });
+    const t = d.trends.psc;
+    if (t.n >= 3 && t.fit) { const a0 = pts[0].d, a1 = pts[pts.length - 1].d, x0 = PSC.yearFrac(a0), x1 = PSC.yearFrac(a1); body += `<line x1="${X(a0)}" x2="${X(a1)}" y1="${Y(Math.max(0, t.fit.intercept + t.fit.slope * x0))}" y2="${Y(Math.max(0, t.fit.intercept + t.fit.slope * x1))}" stroke="#6b4fa0" stroke-width="1.6" stroke-dasharray="7 4" clip-path="url(#dosclip-${kind})"/>`; }
+  }
+  if (base !== null && base !== undefined) body += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(base)}" y2="${Y(base)}" stroke="#c2533e" stroke-width="1.3" stroke-dasharray="3 3"/>`;
+  // 圖例（左上角，避免與資料重疊）
+  const lg = []; if (base !== null && base !== undefined) lg.push(['<line x1="0" x2="18" y1="0" y2="0" stroke="#c2533e" stroke-width="1.3" stroke-dasharray="3 3"/>', baseLbl]);
+  if (kind === 'psc') { lg.push(['<line x1="0" x2="18" y1="0" y2="0" stroke="#3f7f74" stroke-width="2"/>', T('近 3 次移動平均', '3-insp. moving avg')]); if (d.trends.psc.n >= 3) lg.push(['<line x1="0" x2="18" y1="0" y2="0" stroke="#6b4fa0" stroke-width="1.6" stroke-dasharray="7 4"/>', T('期間趨勢線', 'Period trend')]); }
+  const tw = txt => [...txt].reduce((n, c) => n + (/[\u2E80-\uFFEF]/.test(c) ? 10.6 : 5.9), 0);
+  let lx = m.l + 6, ly = 12; lg.forEach(([sym, txt]) => { const wd = 26 + tw(txt); if (lx + wd > W - m.r && lx > m.l + 6) { lx = m.l + 6; ly += 15; } body += `<g transform="translate(${lx},${ly})"><rect x="-3" y="-8" width="${wd}" height="15" fill="#ffffff" opacity="0.88"/>${sym}<text x="23" y="3.5" font-size="10.5" fill="#2b3a3b">${esc(txt)}</text></g>`; lx += wd + 10; });
+  if (!pts.length || (kind === 'psc' && !pts.length)) body += `<text x="${W / 2}" y="${H / 2}" font-size="13" text-anchor="middle" fill="#8a9a9b">${T('期間內沒有資料', 'No data in period')}</text>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" font-family="Arial,'Microsoft JhengHei',sans-serif" role="img"><defs><clipPath id="dosclip-${kind}"><rect x="${m.l}" y="${m.t}" width="${iw}" height="${ih}"/></clipPath></defs><rect width="${W}" height="${H}" fill="#ffffff"/><line x1="${m.l}" x2="${W - m.r}" y1="${m.t + ih}" y2="${m.t + ih}" stroke="#8a9a9b"/>${body}</svg>`;
+}
+function svgToPng(svg, w, h) {
+  return new Promise(res => { const img = new Image(); img.onload = () => { const c = document.createElement('canvas'); c.width = w * 2; c.height = h * 2; const g = c.getContext('2d'); g.scale(2, 2); g.drawImage(img, 0, 0, w, h); try { res(c.toDataURL('image/png')); } catch (e) { res(''); } }; img.onerror = () => res(''); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+}
+function dosTrendText(t, lang, base, bv) {
+  const T = dosT(lang); if (!t.n) return T('期間內沒有資料', 'No data in period');
+  const dir = { up: T('上升', 'rising'), down: T('下降', 'falling'), flat: T('持平', 'flat') }[t.dir], f = v => (Math.round(v * 100) / 100).toFixed(2), sg = v => (v > 0 ? '+' : v < 0 ? '−' : '±') + f(Math.abs(v));
+  const mean = `${T('平均', 'Mean')} ${f(t.mean)}${t.vsBase === null ? '' : Math.abs(t.vsBase) < 0.005 ? `（${T('與', 'same as')} ${base}${bv !== undefined && bv !== null ? ' ' + f(bv) : ''} ${T('相同', '')}）`.replace(' ）', '）') : `（${base}${bv !== undefined && bv !== null ? ' ' + f(bv) : ''}；${t.vsBase > 0 ? T('高', 'higher by') : T('低', 'lower by')} ${f(Math.abs(t.vsBase))}）`}`;
+  if (t.n < 3) return `${mean}・${T('樣本不足 3 個，不計算趨勢', 'fewer than 3 data points, no trend')}・n=${t.n}`;
+  return `${mean}・${T('趨勢', 'Trend')} ${dir} ${sg(t.slope)}/${T('年', 'yr')}・${T('期間變化', 'Change')} ${sg(t.change)}・n=${t.n}`;
+}
+function dossierHTML(d, st) {
+  const lang = st.lang, L = dosL(lang), T = dosT(lang), sh = d.ship, k = d.kpi, a = d.assessment, w = d.window, p36 = d.psc.perf36, avg = d.psc.avg;
+  const age = sh.date_of_build ? ((Date.parse(today()) - Date.parse(sh.date_of_build)) / 3.15576e10).toFixed(1) : '';
+  const facts = [[L('IMO', 'IMO'), esc(sh.imo || '—')], [L('船旗', 'Flag'), esc(sh.flag || '—')], [L('船級', 'Class'), esc(sh.class_society || '—')], [L('建造', 'Built'), sh.date_of_build ? `${dfmt(sh.date_of_build)}（${age} ${T('年', 'yrs')}）` : '—'],
+    [L('載重噸', 'DWT'), esc(sh.deadweight || '—')], [L('總噸', 'GT'), esc(sh.gross_tonnage || '—')], [L('管理公司', 'Manager'), esc(coLabel(sh.company) + (sh.management && !['FLEET', 'FML', 'VSHIPS', 'V-SHIP', 'V.SHIPS', 'BSM', 'TSL', 'TEH'].includes(String(sh.management).toUpperCase()) && sh.management !== coLabel(sh.company) ? '・' + sh.management : ''))], [L('TSL PIC', 'TSL PIC'), esc(sh.pic || '—')]];
+  if (sh.former.length) facts.push([L('曾用名', 'Former names'), esc(sh.former.join('、'))]);
+  const kpi = (lab, v, sub) => `<div class="kpi"><div class="k">${lab}</div><div class="v num">${v}</div><div class="d">${sub || ''}</div></div>`;
+  const srpTxt = w ? (w.srp ? `${esc(w.srp)}${w.srp_as_of ? `（${T('官方', 'official')} ${dfmt(w.srp_as_of)}）` : ''}` : `${esc(w.srp_est)}（${T('估算', 'estimated')} ${w.srp_points} ${T('點', 'pts')}）`) : '—';
+  const winTxt = !w ? '—' : w.priority === 'I' ? `<span class="rk rk-vl">Priority I</span> ${T('已過窗口', 'overdue by')} ${-w.days_to_close} ${T('天', 'days')}` : w.priority === 'II' ? `<span class="rk rk-l">Priority II</span> ${T('至', 'until')} ${dfmt(w.to)}（${w.days_to_close} ${T('天', 'days')}）` : w.from ? `${T('窗口', 'Window')} ${dfmt(w.from)} ~ ${dfmt(w.to)}${w.days_to_open !== '' ? `（${w.days_to_open} ${T('天後開啟', 'days to open')}）` : ''}` : esc(w.note || '—');
+  const ins = d.inspections, incs = d.incidents;
+  const rsl = d.rightship[0];
+  return `<article class="card rp-doc dos-doc lang-${lang}" id="rp-doc">
+  <header class="rp-head"><div class="eyebrow">${esc(CFG.orgName)}・${T('單船綜合報告', 'Vessel Dossier')}</div>
+  <h1>${esc(sh.vessel)} <span class="dim" style="font-weight:400;font-size:16px">${esc(sh.chinese)}</span></h1>
+  <div class="rp-meta">${L('期間', 'Period', 1)} <b>${dfmt(d.period.from)} ~ ${dfmt(d.period.to)}</b>・${L('製表', 'Prepared by', 1)} ${esc((USER && (USER.name || USER.email)) || '')}・${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC</div></header>
+  <dl class="facts dos-facts">${facts.map(([x, y]) => `<div><dt>${x}</dt><dd>${y}</dd></div>`).join('')}</dl>
+
+  <h2 class="rp-h">1. ${L('綜合風險評估', 'Overall risk assessment', 1)}</h2>
+  <div class="dos-risk"><div class="dos-badge rkbg-${DOS_LV_CLS[a.level]}"><span>${T('風險等級', 'Risk level')}</span><b>${lang === 'en' ? a.label.en : lang === 'zh' ? a.label.zh : a.label.zh + ' ' + a.label.en}</b><small>${a.total} ${T('點', 'pts')}</small></div>
+  <div class="tbl-wrap"><table class="rp-t dos-ft"><thead><tr><th>${L('評估項目', 'Factor')}</th><th>${L('現況', 'Status')}</th><th class="n">${L('點數', 'Pts')}</th></tr></thead><tbody>${a.factors.map(f => `<tr><td>${lang === 'en' ? esc(f.en) : lang === 'zh' ? esc(f.zh) : esc(f.zh) + `<span class="en-b">${esc(f.en)}</span>`}</td><td>${esc(f.value)}${f.note ? `<div class="dim" style="font-size:11.5px">${esc(f.note)}</div>` : ''}</td><td class="n"><b>${f.points}</b></td></tr>`).join('')}</tbody></table></div></div>
+  <p class="note dos-note">${T('合計 ≥ 8 點高風險、≥ 5 偏高、≥ 2 一般，其餘低風險。事故：高 3／偏高 2／一般 1；PSC 績效：Very Low 3／Low 2／Medium 1；SRP High 2；窗口 Priority I 2／II 1；逾期訪船缺失 ≥ 3 項 2、1–2 項 1；PSC 缺失趨勢上升且高於基準 2、其一 1；RightShip ≤ 2 為 2、< 3.5 為 1。', 'Total ≥ 8 High, ≥ 5 Elevated, ≥ 2 Moderate, otherwise Low. See factor points above.')}</p>
+
+  <h2 class="rp-h">2. ${L('請船端與船管注意', 'Points requiring attention of the vessel and manager', 1)}（${d.attention.length}）</h2>
+  ${d.attention.length ? `<ol class="dos-att">${d.attention.map(x => `<li class="att-${x.level}"><span class="rk rk-${DOS_ATT[x.level].c}">${T(DOS_ATT[x.level].zh, DOS_ATT[x.level].en)}</span><div>${lang !== 'en' ? `<div>${esc(x.zh)}</div>` : ''}${lang !== 'zh' ? `<div class="${lang === 'both' ? 'en-b' : ''}">${esc(x.en)}</div>` : ''}</div></li>`).join('')}</ol>` : `<p class="note">${T('目前沒有需要特別注意的事項。', 'No specific points at this time.')}</p>`}
+
+  ${dosDestHTML(d.dests || [], d, lang)}
+  <div class="kpis rp-kpis">${kpi(L('事故', 'Incidents', 1), k.incidents, `T1 ${k.tiers[1]}・T2 ${k.tiers[2]}・T3 ${k.tiers[3]}`)}${kpi(L('PSC 檢查', 'PSC insp.', 1), k.psc, `NIL ${k.nil}`)}${kpi(L('PSC 缺失', 'PSC def.', 1), k.defs, `ISM ${k.ism}${k.defRatio !== null ? '・' + T('缺失比', 'index') + ' ' + k.defRatio.toFixed(2) : ''}`)}${kpi(L('留置', 'Detentions', 1), k.det, '')}${kpi(L('訪船', 'Visits', 1), k.visits, `${T('缺失', 'findings')} ${k.vfTotal}`)}${kpi(L('未關閉缺失', 'Open findings', 1), k.vfOpenAll, k.vfOverdue ? `<span class="flag">${T('逾期', 'overdue')} ${k.vfOverdue}</span>` : '')}</div>
+
+  <h2 class="rp-h">3. ${L('Tokyo MOU 窗口與風險等級', 'Tokyo MOU window and ship risk profile', 1)}</h2>
+  <div class="tbl-wrap"><table class="rp-t"><tbody>
+    <tr><th>${L('最近一次 Tokyo MOU 檢查', 'Last Tokyo MOU inspection')}</th><td>${w && w.last_tmou_date ? `${dfmt(w.last_tmou_date)}・${esc(w.last_tmou_port)}` : '—'}</td></tr>
+    <tr><th>${L('最近一次 PSC 檢查（任何 MOU）', 'Last PSC inspection (any MOU)')}</th><td>${w && w.last_any_date ? `${dfmt(w.last_any_date)}・${esc(w.last_any_port)}${w.last_any_mou ? '・' + esc(w.last_any_mou) : ''}` : '—'}</td></tr>
+    <tr><th>${L('船舶風險等級 SRP', 'Ship Risk Profile')}</th><td>${srpTxt}${w && w.srp_reasons && w.srp_reasons.length ? `<div class="dim" style="font-size:11.5px">${esc(w.srp_reasons.join('、'))}</div>` : ''}</td></tr>
+    <tr><th>${L('檢查窗口', 'Inspection window')}</th><td>${winTxt}</td></tr>
+    <tr><th>${L('PSC 績效（近 36 個月）', 'PSC performance (36 months)')}</th><td>${p36.n ? `${perfPill(p36.performance, p36.performance)} ${T('缺失比', 'Deficiency index')} ${p36.def_ratio.toFixed(2)}（Tokyo MOU ${avg.def}）・${T('留置率', 'Detention rate')} ${p36.det_rate.toFixed(1)}%（Tokyo MOU ${avg.det}%）・${p36.n} ${T('次', 'insp.')}` : T('36 個月內無 Tokyo MOU 檢查', 'No Tokyo MOU inspection in 36 months')}</td></tr>
+  </tbody></table></div>
+
+  <h2 class="rp-h">4. ${L('風險趨勢', 'Risk trends', 1)}</h2>
+  <div class="dos-chart"><div class="dos-ch-h">${L('PSC 缺失比（每次檢查）與 Tokyo MOU 基準', 'PSC deficiency index per inspection vs Tokyo MOU baseline', 1)}</div>${dosSvg('psc', d, lang)}<div class="dos-ch-s">${dosTrendText(d.trends.psc, lang, 'Tokyo MOU', d.psc.avg.def)}</div></div>
+  <div class="dos-chart"><div class="dos-ch-h">${L('事故嚴重性（每季分數）', 'Incident severity (quarterly score)', 1)}</div>${dosSvg('inc', d, lang)}<div class="dos-ch-s">${dosTrendText(d.trends.inc, lang, T('全期季平均', 'all-time avg'), d.trends.incAvg)}・${T('近 12 個月', 'Last 12 months')} ${d.incRisk.last12} ${T('分', 'pts')}</div></div>
+  <p class="note dos-note">${T('缺失比 =（ISM 缺失 × 5 ＋ 其他缺失）÷ 檢查次數，為 Tokyo MOU 公司績效算法；綠線為近 3 次移動平均，虛線為期間趨勢線。事故分數：Tier 1 = 10、Tier 2 = 4、Tier 3 = 1，4.1 重大事件另加分，PSC 事故 × 0.5（可在系統調整）。', 'Deficiency index = (ISM deficiencies × 5 + other deficiencies) ÷ inspections (Tokyo MOU company-performance method). Green line: 3-inspection moving average; dashed: period trend. Incident score: Tier 1 = 10, Tier 2 = 4, Tier 3 = 1.')}</p>
+
+  <h2 class="rp-h">5. ${L('PSC 檢查與缺失', 'PSC inspections and deficiencies', 1)}（${ins.length}）</h2>
+  ${ins.length ? `<div class="tbl-wrap"><table class="rp-t"><thead><tr><th>${L('日期', 'Date')}</th><th>${L('港口', 'Port')}</th><th>MOU</th><th>${L('結果', 'Result')}</th><th>${L('缺失', 'Deficiencies')}</th></tr></thead><tbody>${ins.map(I => `<tr><td class="num">${dfmt(I.date)}</td><td>${esc(I.port)} <span class="dim">${esc(I.country)}</span></td><td>${esc(I.mou || '—')}</td><td>${I.det ? `<span class="pill det">${T('留置', 'Detained')}</span>` : (I.defs || []).length || Number(I.def_count) ? Math.max((I.defs || []).length, Number(I.def_count) || 0) + ' ' + T('項', 'def.') : '<span class="pill nil">NIL</span>'}</td><td style="font-size:11.5px">${(I.defs || []).map(x => `<div><span class="mono">${esc(x.code || '')}</span> ${esc(x.nature || '')}</div>`).join('') || '—'}</td></tr>`).join('')}</tbody></table></div>` : `<p class="note">${T('期間內沒有 PSC 檢查。', 'No PSC inspection in the period.')}</p>`}
+  ${d.repeats.length ? `<p class="dos-sub"><b>${L('重複缺失', 'Repeated deficiencies', 1)}</b>：${d.repeats.map(r => `<span class="mono">${esc(r.code)}</span> × ${r.n}（${r.dates.map(dfmt).join('、')}）`).join('；')}</p>` : ''}
+  ${Object.keys(d.defsByCat).length ? `<p class="dos-sub"><b>${L('缺失類別', 'By category', 1)}</b>：${Object.entries(d.defsByCat).sort((x, y) => y[1] - x[1]).map(([c, n]) => `${esc(c)} ${esc(CAT[c] || '')} × ${n}`).join('、')}</p>` : ''}
+
+  <h2 class="rp-h">6. ${L('事故', 'Incidents', 1)}（${incs.length}）</h2>
+  ${incs.length ? `<div class="tbl-wrap"><table class="rp-t"><thead><tr><th>${L('日期', 'Date')}</th><th>${L('事故編號', 'Ref. no.')}</th><th>${L('分級', 'Tier')}</th><th>${L('性質', 'Type')}</th><th>${L('簡述', 'Summary')}</th><th>${L('狀態', 'Status')}</th></tr></thead><tbody>${incs.map(x => `<tr><td class="num">${dfmt(x.date)}</td><td class="mono" style="font-size:11px">${esc(x.tracking_no)}</td><td>${tierPill(x.tier)}${x.major_level ? ' <span class="rk rk-vl">4.1</span>' : ''}</td><td>${esc(typeName(x))}${x.psc ? ' <span class="pill cat">PSC</span>' : ''}</td><td class="rp-sum">${esc(x.summary)}</td><td>${esc(x.status)}${x.closed_date ? `<div class="dim" style="font-size:11px">${dfmt(x.closed_date)}</div>` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<p class="note">${T('期間內沒有事故。', 'No incident in the period.')}</p>`}
+
+  <h2 class="rp-h">7. ${L('船東與船管訪船紀錄', 'Owner and manager visits', 1)}（${d.visits.length}）</h2>
+  <p class="dos-sub">${L('最近一次管理公司登輪', 'Last manager visit', 1)}：<b>${d.lastVisit.mgr ? dfmt(d.lastVisit.mgr) : '—'}</b>・${L('最近一次船東登輪', 'Last owner visit', 1)}：<b>${d.lastVisit.own ? dfmt(d.lastVisit.own) : '—'}</b></p>
+  ${d.visits.length ? `<div class="tbl-wrap"><table class="rp-t"><thead><tr><th>${L('日期', 'Date')}</th><th>${L('訪船編號', 'Visit no.')}</th><th>${L('檢查方', 'Party')}</th><th>${L('檢查人員／地點', 'Inspector / place')}</th><th>${L('評分', 'Score')}</th><th>${L('缺失', 'Findings')}</th></tr></thead><tbody>${d.visits.map(x => `<tr><td class="num">${dfmt(x.date_from || x.report_date)}</td><td class="mono" style="font-size:11px">${esc(x.visit_no)}</td><td>${partyTag(x.party)} ${esc(x.vtype || '')}</td><td>${esc(x.inspector || '—')}<div class="dim" style="font-size:11px">${esc(x.port || '')}</div></td><td>${esc(x.score || '—')}</td><td>${x.stats ? `${x.stats.total}・${T('已關閉', 'closed')} ${x.stats.closed}${x.stats.open + x.stats.submitted ? `・<b>${T('未關閉', 'open')} ${x.stats.open + x.stats.submitted}</b>` : ''}${x.stats.overdue ? `・<span class="flag">${T('逾期', 'overdue')} ${x.stats.overdue}</span>` : ''}` : '—'}</td></tr>`).join('')}</tbody></table></div>` : `<p class="note">${T('期間內沒有訪船紀錄。', 'No visit recorded in the period.')}</p>`}
+  <h3 class="dos-h3">${L('未關閉的訪船缺失（不限期間）', 'Open visit findings (all periods)', 1)}（${d.openItems.length}）</h3>
+  ${d.openItems.length ? `<div class="tbl-wrap"><table class="rp-t"><thead><tr><th>${L('期限', 'Due')}</th><th>${L('編號', 'Ref.')}</th><th>${L('項目', 'Item')}</th><th>${L('缺失說明', 'Finding')}</th><th>${L('狀態', 'Status')}</th></tr></thead><tbody>${d.openItems.map(it => `<tr${it.overdue ? ' class="dos-over"' : ''}><td class="num">${it.due_date ? dfmt(it.due_date) : '—'}${it.overdue ? `<div class="flag" style="font-size:11px">${T('逾期', 'overdue')} ${-it.daysLeft} ${T('天', 'd')}</div>` : ''}</td><td class="mono" style="font-size:11px">${esc(it.ref || '#' + it.seq)}<div class="dim">${esc(it.visit_no)}</div></td><td>${esc(it.area || it.section || '')}</td><td style="font-size:11.5px">${esc(String(it.finding || '').split('\n')[0])}</td><td>${esc(it.state)}</td></tr>`).join('')}</tbody></table></div>` : `<p class="note">${T('沒有未關閉的訪船缺失。', 'No open visit finding.')}</p>`}
+
+  <h2 class="rp-h">8. RightShip</h2>
+  ${rsl ? `<div class="tbl-wrap"><table class="rp-t"><thead><tr><th>${L('日期', 'As of')}</th><th>Safety Score</th><th>DOC Subscore</th><th>GHG Rating</th><th>${L('備註', 'Note')}</th></tr></thead><tbody>${d.rightship.slice(0, 6).map(r => `<tr><td class="num">${dfmt(r.as_of)}</td><td><b>${esc(r.safety_score || '—')}</b>${r.indicative ? ' <span class="dim">indicative</span>' : ''}</td><td>${esc(r.doc_subscore || '—')}</td><td>${esc(r.ghg_rating || '—')}</td><td style="font-size:11.5px">${esc(r.note || '')}</td></tr>`).join('')}</tbody></table></div>` : `<p class="note">${T('尚未登錄 RightShip 資料。', 'No RightShip data recorded yet.')}</p>`}
+  <p class="note dos-note">${T('RightShip Safety Score 1–5，由事故、DOC 公司績效、PSC 缺失、留置、船旗與船級六個子分數組成（事故與 DOC 公司績效影響最大，回溯 5 年）；GHG Rating 為 A–E。本系統目前登錄平台查得的分數，計分規則待取得後接入。', 'RightShip Safety Score (1–5) combines incidents, DOC holder performance, PSC deficiencies, detentions, flag and class (incidents and DOC performance weigh most, 5-year look-back). GHG Rating A–E. Scores are recorded from the RightShip platform; rule-based scoring to be added.')}</p>
+  <footer class="rp-foot">${T('資料來源：', 'Source: ')}${esc(CFG.systemName)}。${T('事故依發生日、PSC 依檢查日、訪船依登輪日；Tokyo MOU 指數', 'Incidents by date of occurrence, PSC by inspection date, visits by boarding date; Tokyo MOU indices')} ${esc(avg.valid || '')}。</footer>
+  </article>`;
+}
+function vDossier(v, k) {
+  const st = dosState(k), d = dosData(k, st), T = dosT(st.lang);
+  const ed = can('editor');
+  v.innerHTML = `<button class="backlink no-print" type="button" id="ds-back">← 回到 ${esc(d.ship.vessel)} 船舶履歷</button>
+  <div class="card no-print" id="rp-ctl" style="margin-bottom:16px"><div class="section-head"><div><h2>單船綜合報告</h2><p class="sub" style="margin:2px 0 0">選擇期間與語言，產生這艘船的事故、PSC、訪船、Tokyo MOU 窗口、風險評估與趨勢。可列印成 PDF 或複製到 Outlook 寄給船長與管理公司。</p></div>
+  <div class="btnrow"><button class="btn" type="button" id="ds-print">列印／存成 PDF</button><button class="btn primary" type="button" id="ds-mail">複製到 Outlook</button>${ed ? '<button class="btn" type="button" id="ds-rs">登錄 RightShip</button>' : ''}</div></div>
+  <div class="rp-ctl"><div class="chips">${DOS_PRESETS.map(([kk, l]) => `<button class="chip" type="button" data-dp="${kk}" aria-pressed="${st.preset === kk}">${l}</button>`).join('')}</div>
+  <label class="pl-sel">從 <input class="inp" type="date" id="ds-from" value="${esc(st.preset === 'all' ? d.period.from : st.from)}"></label><label class="pl-sel">到 <input class="inp" type="date" id="ds-to" value="${esc(st.to)}"></label>
+  <label class="pl-sel">前往港口 <input class="inp" id="ds-dest" list="ds-dl" placeholder="例：SHANGHAI" style="width:170px"></label><datalist id="ds-dl">${piPlaces().slice(0, 400).map(x => `<option value="${esc(piLabel(x))}"></option>`).join('')}</datalist><button class="btn sm" type="button" id="ds-dadd">加入</button>${(st.dest || []).map(x => `<span class="chip on">${esc(piLabel(x))} <button type="button" class="chip-x" data-ddel="${esc(x)}" aria-label="移除">×</button></span>`).join('')}
+  <label class="pl-sel">語言 <select id="ds-lang">${opt('both', '中英對照', st.lang === 'both')}${opt('zh', '中文', st.lang === 'zh')}${opt('en', 'English', st.lang === 'en')}</select></label></div></div>
+  ${dossierHTML(d, st)}`;
+  const set = patch => { Object.assign(st, patch); render(); };
+  $('#ds-back').addEventListener('click', () => { S.dossier = null; render(); window.scrollTo({ top: 0 }); });
+  v.querySelectorAll('[data-dp]').forEach(b => b.addEventListener('click', () => { const p = b.dataset.dp; if (p === 'custom') return set({ preset: 'custom' }); if (p === 'all') return set({ preset: 'all', to: today() }); set({ preset: p, from: dosMonthsAgo(p), to: today() }); }));
+  $('#ds-from').addEventListener('change', e => { if (e.target.value) set({ preset: 'custom', from: e.target.value, to: st.to < e.target.value ? e.target.value : st.to }); });
+  $('#ds-to').addEventListener('change', e => { if (e.target.value) set({ preset: 'custom', to: e.target.value, from: st.from > e.target.value ? e.target.value : st.from }); });
+  $('#ds-lang').addEventListener('change', e => { S.dosLang = e.target.value; set({ lang: e.target.value }); });
+  const dAdd = () => { const val = $('#ds-dest').value.trim(); if (!val) return; const kk = piFind(val); if (!kk) { toast('找不到這個港口或國家的 PSC 紀錄'); return; } if ((st.dest || []).includes(kk)) return; if ((st.dest || []).length >= 3) { toast('最多 3 個港口'); return; } set({ dest: (st.dest || []).concat([kk]) }); };
+  $('#ds-dadd').addEventListener('click', dAdd); $('#ds-dest').addEventListener('keydown', e => { if (e.key === 'Enter') dAdd(); });
+  v.querySelectorAll('[data-ddel]').forEach(b => b.addEventListener('click', () => set({ dest: st.dest.filter(x => x !== b.dataset.ddel) })));
+  $('#ds-print').addEventListener('click', () => { const t = document.title; document.title = `TSL_VesselDossier_${d.ship.vessel.replace(/\s+/g, '-')}_${d.period.from}_${d.period.to}`; window.print(); setTimeout(() => { document.title = t; }, 500); });
+  $('#ds-mail').addEventListener('click', e => run(() => dosCopyMail(d, st), e.currentTarget));
+  const rb = $('#ds-rs'); if (rb) rb.addEventListener('click', () => rightShipModal(d.ship));
+}
+/** Outlook 信文：內嵌樣式、表格版面，趨勢圖轉成 PNG 圖片 */
+async function dosEmail(d, st) {
+  const lang = st.lang, T = dosT(lang), BI = (zh, en) => lang === 'zh' || zh === en ? esc(zh) : lang === 'en' ? esc(en) : `${esc(zh)}<br><span style="color:#5b6a6b;font-size:11.5px">${esc(en)}</span>`;
+  const sh = d.ship, k = d.kpi, a = d.assessment, w = d.window, p36 = d.psc.perf36, avg = d.psc.avg;
+  const FONT = "font-family:Arial,'Microsoft JhengHei',sans-serif", td = 'border:1px solid #d0d8d1;padding:4px 8px;font-size:12px;vertical-align:top', th = td + ';background:#eef2ee;text-align:left';
+  const LV = { H: '#b42318', E: '#c4590a', M: '#8a6a00', L: '#2f7d32' }, AC = { high: '#b42318', med: '#8a6a00', info: '#2f7d32' };
+  const tbl = (head, rows) => `<table style="border-collapse:collapse;margin:4px 0 12px;${FONT}">${head ? `<tr>${head.map(h => `<th style="${th}">${h}</th>`).join('')}</tr>` : ''}${rows.map(r => `<tr>${r.map(c => `<td style="${td}">${c}</td>`).join('')}</tr>`).join('')}</table>`;
+  const h2 = (zh, en) => `<p style="font-size:14px;font-weight:bold;margin:16px 0 4px;color:#1f3864">${lang === 'en' ? esc(en) : lang === 'zh' ? esc(zh) : esc(zh) + ' ' + esc(en)}</p>`;
+  const pngP = await svgToPng(dosSvg('psc', d, lang, 640), 640, 256), pngI = await svgToPng(dosSvg('inc', d, lang, 640), 640, 256);
+  const title = `${sh.vessel} ${T('單船綜合報告', 'Vessel Dossier')}`, period = `${d.period.from} ~ ${d.period.to}`;
+  const mgr = coLabel(sh.company);
+  let h = `<div style="${FONT};font-size:13px;color:#1f2b2c">`;
+  h += `<p style="margin:0 0 8px">${lang === 'en' ? `Dear Captain and ${esc(mgr)} team,` : lang === 'zh' ? `船長及 ${esc(mgr)} 團隊 您好：` : `船長及 ${esc(mgr)} 團隊 您好：<br>Dear Captain and ${esc(mgr)} team,`}</p>`;
+  h += `<p style="margin:0 0 10px">${lang === 'en' ? `Please find below the vessel dossier of ${esc(sh.vessel)} for ${esc(period)}. Kindly review the points requiring attention and take the necessary actions.` : lang === 'zh' ? `以下為 ${esc(sh.vessel)}（${esc(period)}）的單船綜合報告，請檢視「請船端與船管注意」事項並採取必要措施。` : `以下為 ${esc(sh.vessel)}（${esc(period)}）的單船綜合報告，請檢視「請船端與船管注意」事項並採取必要措施。<br>Please find below the vessel dossier of ${esc(sh.vessel)} for ${esc(period)}. Kindly review the points requiring attention and take the necessary actions.`}</p>`;
+  h += `<p style="font-size:16px;font-weight:bold;margin:0">${esc(title)}</p><p style="margin:2px 0 10px;color:#4a585a">IMO ${esc(sh.imo)}・${esc(sh.flag || '')}・${esc(sh.class_society || '')}・${esc(mgr)}・${T('期間', 'Period')} ${esc(period)}</p>`;
+  h += `<table style="border-collapse:collapse;margin:0 0 6px;${FONT}"><tr><td style="background:${LV[a.level]};color:#fff;padding:8px 14px;font-size:15px;font-weight:bold">${T('風險等級', 'Risk level')}：${lang === 'en' ? a.label.en : lang === 'zh' ? a.label.zh : a.label.zh + ' ' + a.label.en}（${a.total} ${T('點', 'pts')}）</td></tr></table>`;
+  h += tbl([BI('評估項目', 'Factor'), BI('現況', 'Status'), BI('點數', 'Pts')], a.factors.map(f => [BI(f.zh, f.en), esc(f.value) + (f.note ? `<br><span style="color:#5b6a6b;font-size:11px">${esc(f.note)}</span>` : ''), `<b>${f.points}</b>`]));
+  h += h2('請船端與船管注意', 'Points requiring attention');
+  h += d.attention.length ? `<ol style="margin:4px 0 12px 18px;padding:0">${d.attention.map(x => `<li style="margin:0 0 6px"><span style="color:${AC[x.level]};font-weight:bold">[${T(DOS_ATT[x.level].zh, DOS_ATT[x.level].en)}]</span> ${BI(x.zh, x.en)}</li>`).join('')}</ol>` : `<p>${T('目前沒有需要特別注意的事項。', 'No specific points at this time.')}</p>`;
+  (d.dests || []).forEach(pr => {
+    const o = pr.own, n = pr.national;
+    h += h2(`前往 ${piLabel(pr.key)} PSC 重點`, `PSC focus at ${piLabel(pr.key)}`) + `<p style="margin:0 0 4px;color:#4a585a;font-size:12px">${esc(pr.mou || '')} ${T('統計期間', 'Period')} ${pr.query.from} ~ ${pr.query.to}</p>`;
+    h += tbl(null, [[BI('本船隊在此港檢查', 'TSL fleet inspections here'), `${o.inspections}・NIL ${o.nil}・${T('留置', 'det.')} ${o.det}${o.index !== null ? `・${T('缺失比', 'index')} ${o.index.toFixed(2)}（Tokyo MOU ${pr.avg.def}）` : ''}`], [BI('外部資料', 'External records'), `${pr.ext.records}・${T('留置', 'det.')} ${pr.ext.detentions}`]].concat(n ? [[BI(n.year + ' 全國', n.year + ' national'), `${T('留置率', 'det. rate')} ${n.rate.toFixed(2)}%・${T('每次檢查', 'per insp.')} ${n.defPerInsp.toFixed(2)}`]] : []));
+    if (pr.mouRef) { const m = mouRefHTML(pr.mouRef, 'data', lang); h += `<p style="margin:2px 0 6px;font-size:12px">${BI(pr.mouRef.mou + ' ' + pr.mouRef.year + ' 年報', pr.mouRef.mou + ' ' + pr.mouRef.year + ' annual report')}：${m.txt}${m.top.length ? `<br>${T('最常見', 'Most frequent')}：${m.top.map(x => lang === 'en' ? esc(x.name) : esc(x.zh)).join('、')}` : ''}</p>`; }
+    const dc = dosDestCats(pr); if (dc.length) h += `${dc.fromMou ? `<p style="margin:0 0 2px;font-size:12px">${BI(pr.mouRef.mou + ' 全區最常開出的類別（此港紀錄不足）', 'Most frequent areas in ' + pr.mouRef.mou + ' (few records at this port)')}</p>` : ''}<ol style="margin:4px 0 8px 18px;padding:0">${dc.map(c => `<li style="margin:0 0 5px"><b>${esc(c.cat)} ${lang === 'en' ? '' : esc(c.name)}</b>（${c.pct !== undefined ? c.pct.toFixed(1) + '%' : c.total}）<br>${BI(c.tip[0], c.tip[1])}</li>`).join('')}</ol>`;
+    if (pr.codes.length) h += tbl([BI('代碼', 'Code'), BI('實例', 'Example'), BI('次數', 'Count')], pr.codes.slice(0, 8).map(c => [`${esc(c.code)}${c.ship ? ' ★' : ''}`, esc(c.text || ''), String(c.total)])) + `<p style="margin:0 0 10px;color:#5b6a6b;font-size:11.5px">★ ${T('本船過去也被開過的缺失代碼，請優先自我檢查。', 'Codes this vessel has also received before.')}</p>`;
+  });
+  h += tbl([BI('事故', 'Incidents'), BI('PSC 檢查', 'PSC insp.'), BI('PSC 缺失', 'PSC def.'), BI('留置', 'Detentions'), BI('訪船', 'Visits'), BI('未關閉缺失', 'Open findings')], [[`${k.incidents}（T1 ${k.tiers[1]}／T2 ${k.tiers[2]}／T3 ${k.tiers[3]}）`, `${k.psc}（NIL ${k.nil}）`, `${k.defs}（ISM ${k.ism}）`, k.det, k.visits, `${k.vfOpenAll}${k.vfOverdue ? `（${T('逾期', 'overdue')} ${k.vfOverdue}）` : ''}`]]);
+  h += h2('Tokyo MOU 窗口與風險等級', 'Tokyo MOU window and risk profile');
+  h += tbl(null, [[BI('最近 Tokyo MOU 檢查', 'Last Tokyo MOU insp.'), w && w.last_tmou_date ? `${w.last_tmou_date}・${esc(w.last_tmou_port)}` : '—'], [BI('SRP', 'Ship Risk Profile'), w ? esc(w.srp || w.srp_est + ' (' + T('估算', 'est.') + ')') : '—'], [BI('檢查窗口', 'Window'), !w ? '—' : w.priority === 'I' ? `<b style="color:#b42318">Priority I</b>（${T('已過', 'overdue')} ${-w.days_to_close} ${T('天', 'd')}）` : w.priority === 'II' ? `<b style="color:#c4590a">Priority II</b>（${T('至', 'until')} ${w.to}）` : w.from ? `${w.from} ~ ${w.to}` : esc(w.note || '—')], [BI('PSC 績效（36 個月）', 'PSC performance (36m)'), p36.n ? `${esc(p36.performance)}・${T('缺失比', 'index')} ${p36.def_ratio.toFixed(2)}（Tokyo MOU ${avg.def}）・${T('留置率', 'det. rate')} ${p36.det_rate.toFixed(1)}%` : '—']]);
+  h += h2('風險趨勢', 'Risk trends');
+  h += `<p style="margin:2px 0">${BI('PSC 缺失比與 Tokyo MOU 基準', 'PSC deficiency index vs Tokyo MOU baseline')}</p>${pngP ? `<img src="${pngP}" width="640" height="256" alt="PSC trend" style="display:block;border:1px solid #d0d8d1">` : ''}<p style="margin:2px 0 10px;color:#4a585a;font-size:12px">${esc(dosTrendText(d.trends.psc, lang, 'Tokyo MOU', d.psc.avg.def).replace(/<[^>]+>/g, ''))}</p>`;
+  h += `<p style="margin:2px 0">${BI('事故嚴重性（每季分數）', 'Incident severity (quarterly)')}</p>${pngI ? `<img src="${pngI}" width="640" height="256" alt="Incident trend" style="display:block;border:1px solid #d0d8d1">` : ''}<p style="margin:2px 0 10px;color:#4a585a;font-size:12px">${esc(dosTrendText(d.trends.inc, lang, T('全期季平均', 'all-time avg'), d.trends.incAvg))}</p>`;
+  h += h2(`PSC 檢查（${d.inspections.length}）`, `PSC inspections (${d.inspections.length})`);
+  h += d.inspections.length ? tbl([BI('日期', 'Date'), BI('港口', 'Port'), 'MOU', BI('結果', 'Result'), BI('缺失', 'Deficiencies')], d.inspections.map(I => [I.date, `${esc(I.port)} ${esc(I.country || '')}`, esc(I.mou || ''), I.det ? T('留置', 'Detained') : (I.defs || []).length || Number(I.def_count) ? Math.max((I.defs || []).length, Number(I.def_count) || 0) + ' ' + T('項', 'def.') : 'NIL', (I.defs || []).map(x => `${esc(x.code || '')} ${esc(x.nature || '')}`).join('<br>') || '—'])) : `<p>${T('期間內沒有 PSC 檢查。', 'No PSC inspection in the period.')}</p>`;
+  h += h2(`事故（${d.incidents.length}）`, `Incidents (${d.incidents.length})`);
+  h += d.incidents.length ? tbl([BI('日期', 'Date'), BI('事故編號', 'Ref. no.'), BI('分級', 'Tier'), BI('簡述', 'Summary'), BI('狀態', 'Status')], d.incidents.map(x => [x.date, esc(x.tracking_no), 'Tier ' + esc(x.tier), esc(x.summary), esc(x.status)])) : `<p>${T('期間內沒有事故。', 'No incident in the period.')}</p>`;
+  h += h2(`未關閉的訪船缺失（${d.openItems.length}）`, `Open visit findings (${d.openItems.length})`);
+  h += d.openItems.length ? tbl([BI('期限', 'Due'), BI('編號', 'Ref.'), BI('項目', 'Item'), BI('缺失說明', 'Finding'), BI('狀態', 'Status')], d.openItems.map(it => [(it.due_date || '—') + (it.overdue ? `<br><b style="color:#b42318">${T('逾期', 'overdue')} ${-it.daysLeft} ${T('天', 'd')}</b>` : ''), esc(it.ref || '#' + it.seq) + `<br><span style="color:#5b6a6b;font-size:11px">${esc(it.visit_no)}</span>`, esc(it.area || it.section || ''), esc(String(it.finding || '').split('\n')[0]), esc(it.state)])) : `<p>${T('沒有未關閉的訪船缺失。', 'No open visit finding.')}</p>`;
+  h += h2(`訪船紀錄（${d.visits.length}）`, `Visits (${d.visits.length})`);
+  h += d.visits.length ? tbl([BI('日期', 'Date'), BI('訪船編號', 'Visit no.'), BI('檢查方', 'Party'), BI('檢查人員', 'Inspector'), BI('缺失', 'Findings')], d.visits.map(x => [x.date_from || x.report_date || '', esc(x.visit_no), esc(x.party + ' ' + (x.vtype || '')), esc(x.inspector || ''), x.stats ? `${x.stats.total}（${T('未關閉', 'open')} ${x.stats.open + x.stats.submitted}）` : '—'])) : `<p>${T('期間內沒有訪船紀錄。', 'No visit recorded in the period.')}</p>`;
+  if (d.rightship[0]) { const r = d.rightship[0]; h += h2('RightShip', 'RightShip') + tbl(['As of', 'Safety Score', 'DOC Subscore', 'GHG Rating'], [[r.as_of, esc(r.safety_score || '—') + (r.indicative ? ' (indicative)' : ''), esc(r.doc_subscore || '—'), esc(r.ghg_rating || '—')]]); }
+  h += `<p style="margin:14px 0 0;color:#5b6a6b;font-size:11.5px">${T('本報告由 TSL MARTEC 系統產生。', 'Generated by the TSL MARTEC system.')} ${esc(new Date().toISOString().slice(0, 16).replace('T', ' '))} UTC</p></div>`;
+  const text = [title, `IMO ${sh.imo}・${period}`, `${T('風險等級', 'Risk level')}: ${a.label.zh} ${a.label.en} (${a.total})`, ''].concat(d.attention.map((x, i) => `${i + 1}. ${lang === 'en' ? x.en : x.zh}${lang === 'both' ? ' / ' + x.en : ''}`)).join('\n');
+  return { html: h, text, subject: `[TSL MARTEC] ${sh.vessel} ${T('單船綜合報告', 'Vessel Dossier')} ${period}` };
+}
+async function dosCopyMail(d, st) {
+  const m = await dosEmail(d, st);
+  try { await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([m.html], { type: 'text/html' }), 'text/plain': new Blob([m.text], { type: 'text/plain' }) })]); }
+  catch (e) {
+    const box = document.createElement('div'); box.innerHTML = m.html; box.style.cssText = 'position:fixed;left:-9999px;top:0'; document.body.appendChild(box);
+    const rg = document.createRange(); rg.selectNodeContents(box); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+    try { document.execCommand('copy'); } catch (_) { sel.removeAllRanges(); box.remove(); toast('瀏覽器不允許複製，請改用「列印／存成 PDF」'); return; }
+    sel.removeAllRanges(); box.remove();
+  }
+  toast(`已複製報告，可直接貼到 Outlook。主旨：${m.subject}`, 8000);
+  S.dosSubject = m.subject;
+}
+function rightShipModal(sh) {
+  openModal({ title: '登錄 RightShip', sub: `${esc(sh.vessel)}・IMO ${esc(sh.imo)}・資料來源 RightShip 平台（同一天再登錄會覆蓋）`,
+    html: `<div class="form"><div class="frow"><div class="field"><label for="rs-date">查詢日期</label><input class="inp" type="date" id="rs-date" value="${today()}"></div><div class="field"><label for="rs-ss">Safety Score（1–5）</label><input class="inp" id="rs-ss" inputmode="decimal" placeholder="4"></div><div class="field"><label for="rs-doc">DOC Subscore（1–5）</label><input class="inp" id="rs-doc" inputmode="decimal" placeholder="3.8"></div><div class="field"><label for="rs-ghg">GHG Rating（A–E）</label><input class="inp" id="rs-ghg" maxlength="1" placeholder="B" style="text-transform:uppercase"></div></div>
+    <label class="pl-sel"><input type="checkbox" id="rs-ind"> Indicative（資料不足的暫定分數）</label>
+    <div class="field"><label for="rs-note">備註</label><input class="inp" id="rs-note" placeholder="例：PSC 留置申訴中、DOC 更換"></div><div id="rs-err" class="err"></div></div>`,
+    foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="rs-go">儲存</button>`,
+    onMount(root, close) {
+      const q = s2 => root.querySelector(s2); root.querySelector('[data-close]').addEventListener('click', close);
+      q('#rs-go').addEventListener('click', () => run(async () => {
+        try { await api('saveRightShip', { imo: sh.imo, vessel: sh.vessel, as_of: q('#rs-date').value, safety_score: q('#rs-ss').value.trim(), doc_subscore: q('#rs-doc').value.trim(), ghg_rating: q('#rs-ghg').value.trim(), indicative: q('#rs-ind').checked ? 'Y' : '', note: q('#rs-note').value.trim() }); }
+        catch (e) { q('#rs-err').textContent = e.message; return; }
+        await close(); await reload(); toast('已登錄 RightShip');
+      }, q('#rs-go')));
+    } });
 }
 
 /* ---------- 週報 / 月報：選期間一鍵產生，列印成 PDF、複製到 Outlook、下載 CSV ---------- */
@@ -1068,6 +1777,7 @@ function trendChart(card, o) {
   if (base !== null && base !== undefined) svg.append('line').attr('class', 'tr-base ctx').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y2(base)).attr('y2', y2(base));
   svg.append('text').attr('class', 'tr-hint').attr('x', W - m.r).attr('text-anchor', 'end').attr('y', m.t + H1 + GAP - 5).text('↔ 拖曳下方時間軸、拉動兩側把手選擇期間');
   const draw = dom => {
+    pathR.interrupt('draw'); dots.interrupt('draw'); reg.interrupt('draw');
     x.domain(dom);
     gx.call(d3.axisBottom(x).ticks(nt).tickFormat(tf).tickSizeOuter(0));
     dots.attr('cx', p => x(p.t)).attr('cy', p => y(p.v)).attr('opacity', p => p.t >= dom[0] && p.t <= dom[1] ? 1 : 0.25);
@@ -1096,6 +1806,9 @@ function trendChart(card, o) {
   };
   card.querySelectorAll('[data-rng]').forEach(b => b.addEventListener('click', () => setRange(b.dataset.rng)));
   setRange(o.initial || 'all');
+  // 第一次顯示時把移動平均線畫出來，點隨線出現，最後畫趨勢線
+  const end = drawLineIn(svg, pathR, dots, { dur: 1300 }); drawLineIn(svg, svg.select('path.tr-roll.ctx'), null, { dur: 1300 });
+  if (end && +reg.attr('opacity')) drawLineIn(svg, reg, null, { delay: end, dur: 500 });
 }
 
 /* ---------- 事故管理：船舶事故卡片、年度嚴重性風險、事故時間軸 ---------- */
@@ -1139,7 +1852,8 @@ function vIncVessels(v) {
   const avgQ = qp.length ? qp.reduce((s2, p) => s2 + p.v, 0) / qp.length : null;
   trendChart($('#tr-inc'), { points: qp, baseline: avgQ, baseLabel: '全期季平均', baseKind: 'ref', agg: true, roll: 2, band: 2, fmt: v => v.toFixed(1), yLabel: '季分數', meanLabel: '平均每季分數', tip: p => `<b>${esc(p.label)}</b><div class="row"><span>事故</span><span>${p.n} 件</span></div><div class="row"><span>分數</span><span>${p.v}</span></div>` });
   v.querySelectorAll('[data-iv]').forEach(b => b.addEventListener('click', () => { S.incVessel = b.dataset.iv; render(); window.scrollTo({ top: 0 }); }));
-  $('#iv-sort').addEventListener('change', e => { S.ivSort = e.target.value; render(); });
+  sortableCards((v.querySelector('.vgrid > [data-iv]') || {}).parentElement, { key: 'inc-vessels', attr: 'iv' });
+  $('#iv-sort').addEventListener('change', e => { S.ivSort = e.target.value; saveOrder('inc-vessels', null); render(); });
 }
 function incMatchNoYear(x) { const y = S.years; S.years = new Set(); try { return incMatch(x); } finally { S.years = y; } }
 function inspMatchNoYear(I) { const y = S.years; S.years = new Set(); try { return inspMatch(I); } finally { S.years = y; } }
@@ -1214,6 +1928,7 @@ function vVessels(v) {
   const list = Object.entries(agg).map(([k, o]) => ({ k, o, V: M.vreg[k] })).sort((a, b) => sorts[sk](a, b) || (a.V.name < b.V.name ? -1 : 1));
   const cnt = {}; list.forEach(x => { const p = x.o.p.performance || '—'; cnt[p] = (cnt[p] || 0) + 1; });
   html += trendBlockHTML('tr-fleet', '船隊缺失趨勢', `每季缺失比 =（ISM 缺失 × 5 ＋ 其他缺失）÷ 檢查次數；紅色虛線為 Tokyo MOU 平均缺失指數 ${avg.def}（${esc(avg.valid)}）。依目前的管理公司、MOU、港口國篩選，不受年度篩選影響；拖曳下方時間軸選擇期間，看平均、趨勢與變化量。`);
+  html += cmpHTML();
   html += companyPerfHTML(c, avg);
   html += `<div class="card perf-legend"><div class="pl-row"><span><b class="num">${list.length}</b> 艘船有 PSC 紀錄（依篩選條件）</span><label class="pl-sel">期間 <select id="pf-basis">${opt('filter', '依目前篩選', S.perfBasis !== '36m')}${opt('36m', '近 36 個月 Tokyo MOU（官方算法）', S.perfBasis === '36m')}</select></label><label class="pl-sel">排序 <select id="pf-sort">${opt('d', '缺失件數', sk === 'd')}${opt('risk', '風險（高 → 低）', sk === 'risk')}${opt('ratio', '缺失比', sk === 'ratio')}</select></label></div>
   <div class="pl-row">${['VERY LOW', 'LOW', 'MEDIUM', 'HIGH'].map(p => `${perfPill(p)}<span class="num dim" style="margin-right:8px">${cnt[p] || 0}</span>`).join('')}${cnt['—'] ? `<span class="dim">無檢查 ${cnt['—']}</span>` : ''}</div>
@@ -1223,12 +1938,14 @@ function vVessels(v) {
   const tmouT = { baseline: avg.def, baseLabel: 'Tokyo MOU 缺失指數', baseKind: 'tmou', yLabel: '缺失比', meanLabel: '平均缺失比' };
   trendChart($('#tr-fleet'), Object.assign({}, tmouT, { points: PSC.quarterTrendPoints(M.insp.filter(inspMatchNoYear)), agg: true, roll: 4, unitN: '次檢查',
     tip: p => `<b>${esc(p.label)}</b><div class="row"><span>檢查</span><span>${p.w} 次</span></div><div class="row"><span>缺失比</span><span>${p.v.toFixed(2)}</span></div>${p.det ? `<div class="row"><span>留置</span><span>${p.det}</span></div>` : ''}` }));
+  wireCmp();
   if (S.profile && M.vreg[S.profile]) trendChart($('#tr-ship'), Object.assign({}, tmouT, { points: PSC.inspTrendPoints(M.vreg[S.profile].insp.filter(inspMatchNoYear)), roll: 3, band: 0.5,
     tip: p => `<b>${dfmt(p.d)}</b> <span class="dim">${esc(p.ref.port)}</span><div class="row"><span>缺失</span><span>${p.ref.defs.length} 項${p.ref.det ? '・留置' : ''}</span></div><div class="row"><span>缺失比</span><span>${p.v}</span></div>`, onClick: p => openCase(p.ref.insp_id) }));
   const tl = $('#to-inc-tl'); if (tl) tl.addEventListener('click', e => { e.preventDefault(); const k = S.profile; S.profile = null; S.incVessel = k; setTab('inc-vessels'); S.incVessel = k; render(); });
   v.querySelectorAll('.vcard').forEach(b => b.addEventListener('click', () => openVessel(b.dataset.vc)));
+  sortableCards((v.querySelector('.vgrid > [data-vc]') || {}).parentElement, { key: 'psc-vessels', attr: 'vc' });
   $('#pf-basis').addEventListener('change', e => { S.perfBasis = e.target.value; render(); });
-  $('#pf-sort').addEventListener('change', e => { S.vSort = e.target.value; render(); });
+  $('#pf-sort').addEventListener('change', e => { S.vSort = e.target.value; saveOrder('psc-vessels', null); render(); });
   const cl = v.querySelector('[data-close]'); if (cl) cl.addEventListener('click', () => { S.profile = null; render(); });
   wireLinks(v);
 }
@@ -1914,7 +2631,7 @@ function vAdmin(v) {
   <div class="tbl-wrap" style="max-height:420px"><table><thead><tr><th>港口國</th><th>港口</th><th>MOU 區域</th><th>也是成員</th><th class="n">檢查次數</th><th>備註</th></tr></thead><tbody>${M.mouMap.slice().sort((a, b) => { const ua = [...mouUse].filter(([k]) => k.split('|')[0] === a.country).reduce((m, [, n]) => m + n, 0), ub = [...mouUse].filter(([k]) => k.split('|')[0] === b.country).reduce((m, [, n]) => m + n, 0); return ub - ua || (a.country < b.country ? -1 : 1) || (a.port < b.port ? -1 : 1); }).map(r => { const used = [...mouUse].filter(([k]) => k.split('|')[0] === r.country).reduce((m, [, n]) => m + n, 0); return `<tr class="click" data-mm="${esc(r.country + '|' + (r.port || ''))}"><td>${esc(r.country)}</td><td>${esc(r.port || '（全國）')}</td><td>${mouTag(r.mou)}</td><td class="dim">${esc(r.also || '')}</td><td class="n">${r.port ? '' : used || '–'}</td><td class="dim" style="font-size:12px">${esc(r.note || '')}</td></tr>`; }).join('')}</tbody></table></div></div>
   ${portsCardHTML()}
   <div class="card"><div class="section-head"><h2>船隊資料（事故編號依此帶入公司碼）</h2><button class="btn" type="button" id="v-new">新增船舶 / 異動</button></div>
-  ${VV ? `<div class="drop" style="margin-bottom:10px"><div class="frow">${[['vessel', '船名（英文）'], ['imo', 'IMO'], ['chinese', '中文船名'], ['manager', '管理公司全名'], ['pic', '監管人員 PIC'], ['pic_email', 'PIC Email'], ['series', '船型系列'], ['flag', '船旗']].map(([k, l]) => `<div class="field"><label for="vv-${k}">${l}</label><input class="inp" id="vv-${k}" data-vv="${k}" value="${esc(VV[k] || '')}"></div>`).join('')}
+  ${VV ? `<div class="drop" style="margin-bottom:10px"><div class="frow">${[['vessel', '船名（英文）'], ['imo', 'IMO'], ['chinese', '中文船名'], ['manager', '管理公司全名'], ['pic', '監管人員 PIC'], ['pic_email', 'PIC Email'], ['series', '船型系列'], ['service', '航線（服務）'], ['flag', '船旗']].map(([k, l]) => `<div class="field"><label for="vv-${k}">${l}</label><input class="inp" id="vv-${k}" data-vv="${k}" value="${esc(VV[k] || '')}"></div>`).join('')}
   <div class="field"><label for="vv-company">事故編號公司碼</label><select id="vv-company" data-vv="company">${companies.map(c => opt(c, c, VV.company === c)).join('')}</select></div><div class="field"><label for="vv-from">生效日（改名 / 換管理公司時填）</label><input class="inp" type="date" id="vv-from" data-vv="valid_from" value="${esc(VV.valid_from || '')}"></div><div class="field"><label for="vv-to">失效日</label><input class="inp" type="date" id="vv-to" data-vv="valid_to" value="${esc(VV.valid_to || '')}"></div></div>
   <div class="field"><label for="vv-note">備註</label><input class="inp" id="vv-note" data-vv="note" value="${esc(VV.note || '')}"></div><p class="note" style="margin:0">船舶改名或更換管理公司時：把舊資料填上失效日，再新增一筆同 IMO、填生效日的新資料。</p><div class="btnrow"><button class="btn primary" type="button" id="vv-save">儲存</button><button class="btn ghost" type="button" id="vv-cancel">取消</button></div></div>` : ''}
   <div class="tbl-wrap"><table><thead><tr><th>船名</th><th>中文</th><th>IMO</th><th>公司碼</th><th>管理公司</th><th>PIC</th><th>生效</th><th>失效</th><th>備註</th></tr></thead><tbody>${M.vessels.slice().sort((a, b) => a.vessel < b.vessel ? -1 : 1).map((x, i) => `<tr class="click" data-vi="${M.vessels.indexOf(x)}"><td>${esc(x.vessel)}</td><td>${esc(x.chinese)}</td><td class="mono">${esc(x.imo)}</td><td class="mono">${esc(x.company)}</td><td>${esc(x.manager || x.management)}</td><td>${esc(x.pic)}</td><td class="num">${dfmt(x.valid_from)}</td><td class="num">${dfmt(x.valid_to)}</td><td class="dim" style="font-size:12px">${esc(x.note)}</td></tr>`).join('')}</tbody></table></div></div>`;
@@ -2258,12 +2975,12 @@ function renderNav() {
   $('#tabs').innerHTML = tabs.map(([k, l]) => `<button class="tab" role="tab" type="button" data-tab="${k}" aria-selected="${k === S.tab}">${l}</button>`).join('');
   $('#tabs').querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { clearDetail(); S.page = 0; setTab(b.dataset.tab); }));
 }
-function clearDetail() { S.caseId = null; S.caseMode = null; S.incId = null; S.closing = false; S.incVessel = null; S.visitNo = null; S.histShip = null; }
+function clearDetail() { S.caseId = null; S.caseMode = null; S.incId = null; S.closing = false; S.incVessel = null; S.visitNo = null; S.histShip = null; S.dossier = null; }
 let lastKey = '', renderTok = 0;
 function render() {
   if (!M) return;
   hideTip();
-  const key = [S.tab, S.caseId, S.caseMode, S.incId, S.profile, S.incVessel, S.visitNo, S.histShip].join('|'), v = $('#view');
+  const key = [S.tab, S.caseId, S.caseMode, S.incId, S.profile, S.incVessel, S.visitNo, S.histShip, S.dossier, S.dos ? [S.dos.from, S.dos.to, S.dos.lang, S.dos.preset, (S.dos.dest || []).join(';')].join(',') : ''].join('|'), v = $('#view');
   if (key !== lastKey && lastKey && v.children.length && !REDUCED) {
     const tok = ++renderTok; lastKey = key;
     fxOut(v).then(() => { if (tok === renderTok) { doRender(); fxIn(v, true); } });
@@ -2279,7 +2996,7 @@ function doRender() {
   ['#f-years', '#f-mgmt', '#f-vessel', '#f-mou', '#f-country', '#f-cat', '#f-q'].forEach(sel => { $(sel).hidden = !!VIS && !VIS.includes(sel); });
   syncFilterUI();
   const v = $('#view');
-  ({ 'inc-overview': vIncOverview, 'inc-vessels': vIncVessels, report: vReport, 'vf-overview': vVfOverview, visits: vVisits, 'vf-items': vVfItems, 'vf-ships': vVfShips, incidents: vIncidents, 'inc-rules': vIncRules, map: vMap, overview: vOverview, inspections: vInspections, records: vRecords, vessels: vVessels, codes: vCodes, window: vWindow, bribe: vBribe, admin: vAdmin }[S.tab] || vIncOverview)(v);
+  ({ 'inc-overview': vIncOverview, 'inc-vessels': vIncVessels, report: vReport, 'vf-overview': vVfOverview, visits: vVisits, 'vf-items': vVfItems, 'vf-ships': vVfShips, incidents: vIncidents, 'inc-rules': vIncRules, map: vMap, overview: vOverview, inspections: vInspections, records: vRecords, vessels: vVessels, codes: vCodes, window: vWindow, portintel: vPortIntel, bribe: vBribe, admin: vAdmin }[S.tab] || vIncOverview)(v);
 }
 function header() {
   $('#m-asof').textContent = dfmt(M.asof);
@@ -2322,6 +3039,8 @@ let rT; addEventListener('resize', () => { clearTimeout(rT); rT = setTimeout(() 
 
 /* ---------- boot ---------- */
 $('#org').textContent = CFG.orgName + ' · Fleet Incident & PSC';
+(() => { const meta = document.querySelector('.mast .meta, header .meta'); if (meta && !$('#m-ver')) { const v = document.createElement('span'); v.id = 'm-ver'; v.className = 'ver-tag'; v.title = '網頁程式版本（app.js／core.js）'; v.textContent = 'v' + APP_VERSION; meta.appendChild(v); } })();
+if (PSC.VERSION !== APP_VERSION) versionBanner('crit', `<b>網頁程式版本不一致</b>：app.js v${APP_VERSION}、core.js v${esc(PSC.VERSION)}。這會讓部分功能用舊規則執行（例如 VIR 報告少讀缺失）。請確認 GitHub 的 assets/core.js 已換成新版，然後按 <b>Ctrl＋Shift＋R</b>（Mac：Cmd＋Shift＋R）強制重新整理。`);
 (() => { const mr = document.querySelector('.mast-right'); if (!mr || $('#rp-quick')) return; const b = document.createElement('button'); b.type = 'button'; b.id = 'rp-quick'; b.className = 'btn sm rp-quick'; b.textContent = '週報／月報'; b.hidden = true; b.addEventListener('click', () => { if (!M) return; clearDetail(); setTab('report'); window.scrollTo({ top: 0 }); }); mr.insertBefore(b, mr.firstChild); })();
 renderThemes();
 $('#sysname').textContent = CFG.systemName; document.title = CFG.systemName;

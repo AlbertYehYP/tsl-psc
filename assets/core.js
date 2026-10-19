@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.10.0';
+  var VERSION = '1.14.0';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -276,7 +276,7 @@ var PSC = (function () {
       'flash_at', 'initial_at', 'progress_at', 'rca_at', 'due_note', 'close_checks', 'former_no', 'rule_set', 'reply_log'],
     Vessels: ['vessel', 'imo', 'chinese', 'company', 'management', 'manager', 'pic', 'pic_email', 'valid_from', 'valid_to',
       'series', 'flag', 'note', 'doc_company_imo', 'class_society', 'class_number', 'flag_code', 'port_of_registry', 'ship_type',
-      'ism_company', 'registered_owner', 'date_of_build', 'gross_tonnage', 'deadweight', 'teu', 'builder', 'nk_data_date'],
+      'ism_company', 'registered_owner', 'date_of_build', 'gross_tonnage', 'deadweight', 'teu', 'builder', 'nk_data_date', 'service'],
     Companies: ['code', 'name', 'doc_imo', 'tmou_performance', 'perf_as_of', 'note', 'greeting', 'email_to', 'email_cc'],
     RiskProfiles: ['imo', 'vessel', 'srp', 'company_performance', 'as_of', 'source', 'note'],
     MOUMap: ['country', 'port', 'mou', 'also', 'note'],
@@ -291,6 +291,9 @@ var PSC = (function () {
       'created_by', 'created_at', 'updated_by', 'updated_at', 'reported_breakdown', 'tasks', 'report_status'],
     VisitItems: ['item_id', 'visit_no', 'seq', 'ref', 'area', 'section', 'finding', 'action_required', 'due_date', 'risk', 'status', 'corrective_action', 'submitted_at', 'closed_at', 'closed_by',
       'verify_note', 'history', 'created_at', 'updated_by', 'updated_at', 'question', 'pms_code', 'psc_code', 'viq_code', 'score', 'ftype'],
+    PortPSC: ['rec_id', 'source', 'mou', 'country', 'port', 'date', 'vessel', 'imo', 'flag', 'ship_type', 'ro', 'detained', 'def_count', 'codes', 'deficiencies', 'company', 'batch', 'imported_by', 'imported_at', 'note'],
+    PortStats: ['stat_id', 'source', 'year', 'mou', 'country', 'port', 'inspections', 'with_def', 'deficiencies', 'detentions', 'detention_rate', 'by_category', 'batch', 'imported_by', 'imported_at', 'note', 'kind', 'ship_type', 'ships', 'all_inspections', 'top_items', 'ref'],
+    RightShip: ['imo', 'vessel', 'as_of', 'safety_score', 'indicative', 'doc_subscore', 'ghg_rating', 'source', 'note', 'updated_by', 'updated_at'],
     AuditLog: ['ts', 'user', 'action', 'ref', 'detail']
   };
   /* ---------------- 回信範本（管理公司各階段通報後的回覆信） ---------------- */
@@ -369,6 +372,12 @@ var PSC = (function () {
     { key: 'google_client_id', value: '', note: 'Google 登入用 OAuth Client ID（與前端 config.js 相同）' },
     { key: 'drive_root_folder_id', value: '', note: '歸檔根資料夾 ID；空白時系統自動建立「TSL PSC System」' },
     { key: 'bribe_roles', value: 'admin,editor', note: '可以查看與登錄 Bribe（索賄）資料的角色' },
+    { key: 'teu_bands', value: '0-2000, 2000-4000, 4000-6000, 7000-', note: '比較趨勢「船型區間」的 TEU 區間（逗號分隔；最後一段寫「7000-」表示以上）。落在區間之間的船自成一組，例 6000–7000' },
+    { key: 'mou_watch_months', value: '2,5,8,11', note: 'MOU 年報自動檢查的月份（每月 15 日前後執行；Tokyo MOU 約 5 月、Paris MOU 約 7 月發布）' },
+    { key: 'mou_watch_last', value: '', note: '最近一次自動檢查（UTC，系統寫入）' },
+    { key: 'mou_watch_status', value: '', note: '最近一次自動檢查結果（系統寫入）' },
+    { key: 'mou_pending', value: '', note: '發現但尚未匯入的新年報（JSON，系統寫入）' },
+    { key: 'port_aliases', value: 'YANGSHAN=SHANGHAI; WAIGAOQIAO=SHANGHAI; WUSONG=SHANGHAI; SHEKOU=SHENZHEN; YANTIAN=SHENZHEN; CHIWAN=SHENZHEN; MAWAN=SHENZHEN; DACHAN BAY=SHENZHEN; NANSHA=GUANGZHOU; HUANGPU=GUANGZHOU; BEILUN=NINGBO; MEISHAN=NINGBO; NINGBO-ZHOUSHAN=NINGBO; XINGANG=TIANJIN; TIANJINXINGANG=TIANJIN; QIANWAN=QINGDAO; HAICANG=XIAMEN; KWAI CHUNG=HONG KONG; TANJUNG PELEPAS=PELEPAS; WESTPORT=PORT KLANG; NORTHPORT=PORT KLANG', note: '港口別名＝主港（港口／國家分析時視為同一港）。分號分隔' },
     { key: 'tmou_members', value: 'AUSTRALIA,CANADA,CHILE,CHINA,FIJI,HONG KONG,INDONESIA,JAPAN,SOUTH KOREA,MALAYSIA,MARSHALL ISLANDS,MEXICO,NEW ZEALAND,PANAMA,PAPUA NEW GUINEA,PERU,PHILIPPINES,RUSSIA,SINGAPORE,THAILAND,VANUATU,VIETNAM', note: '備援用：檢查的 MOU 欄空白時，才用這份 Tokyo MOU 成員國清單判定（正式判定看 MOUMap 對照表）' },
     { key: 'risk_inbox_folder_id', value: '', note: 'Tokyo MOU 窗口檔收件匣資料夾 ID；空白時第一次執行自動建立「Tokyo MOU 收件匣」' },
     { key: 'tmou_white_flags', value: 'Kuwait; Antigua and Barbuda; United States of America; Tuvalu; United Kingdom (UK); France; Indonesia; Cyprus; Panama; Viet Nam; Bermuda (UK); Thailand; Portugal; Germany; Saudi Arabia; Cayman Islands (UK); Liberia; Japan; Greece; Denmark; Malta; Philippines; Malaysia; Bahamas; Marshall Islands; Norway; Isle of Man (UK); Taiwan, China; Korea, Republic of; Singapore; Hong Kong, China; China', note: 'Tokyo MOU 船旗績效 High 名單（2026-07-01 ~ 2027-06-30；估算 SRP 用；以分號分隔；每年 7 月依 Tokyo MOU 公告更新）' },
@@ -1001,7 +1010,7 @@ var PSC = (function () {
   function parseVirPages(pages) {
     var sum = { defects: null, tasks: null, score: '', categories: {}, date: '', by: '', at: '', type: '', vessel: '', status: '' };
     var defects = [], detail = [], section = '', area = '', cols = null, cur = null, inSummary = false, expectArea = false;
-    var HEAD = /^(Sr\.?|No\.?|N|o\.|\.|Description|Remark|Action Required|Due|Date|Due Date|Dat e|PMS|PMS Code|PSC|PSC Code|VIQ|VIQ Code|Code|Score|Scor e|Scor|e|re)$/;
+    var HEAD = /^(Sr\.?|Sr|No\.?|N|o\.|\.|Description|Remark|Action Required|Due|Date|Due Date|Dat e|PMS|PMS Code|PSC|PSC Code|VIQ|VIQ Code|Code|Cod|Score|Scor e|Scor|Sco|e|re)$/;
     var join = function (items) { items.sort(function (a, b) { return a.x - b.x; }); var out = '', end = -1; items.forEach(function (t) { if (out && t.x - end > 1.2) out += ' '; out += t.str; end = t.x + (t.w || 0); }); return out.replace(/\s+/g, ' ').trim(); };
     var lines = function (items) { var ls = []; items.slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; }).forEach(function (t) { var l = null; for (var i = 0; i < ls.length; i++) if (Math.abs(ls[i].y - t.y) < 2.5) { l = ls[i]; break; } if (l) l.items.push(t); else ls.push({ y: t.y, items: [t] }); }); return ls.sort(function (a, b) { return a.y - b.y; }); };
     var catKey = function (n) { return s(n).replace(/\s+/g, '').toUpperCase(); };
@@ -1024,13 +1033,13 @@ var PSC = (function () {
         if (!sum.score && (m = all.match(/Overall Score\s*([\d.]+)/))) sum.score = m[1];
         if (!sum.date && (m = all.match(/Date\s+(\d{1,2} \w{3,9} \d{4})\s+Made by\s+(.+?)\s+While at\s+(.+?)\s+Type\s+(\w+)/))) { sum.date = parseAnyDate(m[1]); sum.by = s(m[2]); sum.at = s(m[3]); sum.type = s(m[4]); }
         if (!sum.vessel && (m = all.match(/Vessel Inspection Report\s+(.+)/))) sum.vessel = s(m[1]);
-        if (!sum.status && (m = all.match(/Report,\s*[^,\n]+,\s*([A-Za-z]+(?: [a-z]+)*)/))) sum.status = s(m[1]);
+        if (!sum.status && (m = all.match(/Report,\s*[^,\n]+,\s*([A-Za-z]+(?: [a-z]+)*)/))) sum.status = s(m[1]).replace(/\s+on$/, '');
       }
       // 表頭位置（同一頁可能有好幾個表）
       var heads = items.filter(function (t) { return s(t.str) === 'Description'; }).map(function (hd) {
         var near = items.filter(function (t) { return Math.abs(t.y - hd.y) < 12; }), f = function (re) { var r = near.filter(function (t) { return re.test(s(t.str)); }); return r.length ? r[0].x - 2 : null; };
         var due = f(/^Due( Date)?$/), pms = f(/^PMS( Code)?$/);
-        return { y: hd.y, c: { desc: hd.x - 6, remark: f(/^Remark$/), action: f(/^Action Required$/), due: due, pms: pms, psc: f(/^PSC( Code)?$/), viq: f(/^VIQ( Code)?$/), score: f(/^Scor(e)?$/) } };
+        return { y: hd.y, c: { desc: hd.x - 6, remark: f(/^Remark$/), action: f(/^Action Required$/), due: due, pms: pms, psc: f(/^PSC( Code)?$/), viq: f(/^VIQ( Code)?$/), score: f(/^Sco(re?)?$/) } };
       }).filter(function (h) { return h.c.remark && h.c.action && h.c.score; });
       var colOf = function (x) { var c = cols; if (!c) return null; return x < c.desc ? 'sr' : x < c.remark ? 'desc' : x < c.action ? 'remark' : x < (c.due || c.pms || c.score) ? 'action' : x < (c.pms || c.psc || c.score) ? 'due' : x < (c.psc || c.viq || c.score) ? 'pms' : x < (c.viq || c.score) ? 'psc' : x < c.score ? 'viq' : 'score'; };
       ls.forEach(function (l, li) {
@@ -1144,6 +1153,32 @@ var PSC = (function () {
     return { format: 'SHIPSURE', summary: sum, defects: defects, detailDefects: [], onlyInDetail: [], reconcile: rec, checks: checks, actions: actions,
       ok: defects.length > 0 && checks.every(function (c) { return c.ok; }) };
   }
+  /** BSM 報告沒有附錄缺失單時：從主文評語擷取（評為 No／Fair／Poor，或留言註明另記為 NC／Observation 的題目） */
+  function bsmBodyOnly(sum, body, secOrder, NEG, FLAG) {
+    sum.mode = 'body'; sum.tasks = body.length || null;
+    sum.answered = body.filter(function (b) { return b.answer && !/^(Not Applicable|N\/A)$/i.test(b.answer); }).length;
+    sum.unanswered = body.filter(function (b) { return !b.answer; }).map(function (b) { return b.section + ' 第 ' + b.no + ' 題'; });
+    sum.notSeen = body.filter(function (b) { return /^Not (Seen|Verified)$/i.test(b.answer); }).length;
+    var picked = body.filter(function (b) { return NEG.test(b.answer) || FLAG.test(b.comment); });
+    var out = picked.map(function (b) {
+      var si = secOrder.indexOf(b.section) + 1, kind = /observation/i.test(b.comment) ? 'Observation' : /\bNC\b|non-?conformit/i.test(b.comment) ? 'Non-conformity' : 'Deficiency';
+      return { ref: 'Q' + si + '.' + String(b.no).padStart(2, '0'), section: b.section, area: '', ftype: kind, question: b.question, finding: s(b.comment) || '（主文評為 ' + b.answer + '，未附說明）',
+        action_required: '', due: '', due_date: '', body_section: b.section, body_answer: b.answer, body_no: b.no, page: b.page, basis: NEG.test(b.answer) ? 'answer' : 'comment', pms_code: '', psc_code: '', viq_code: '', score: b.answer };
+    });
+    sum.defects = out.length || null;
+    out.forEach(function (d) { sum.categories[d.section] = (sum.categories[d.section] || 0) + 1; });
+    var byType = {}; out.forEach(function (d) { byType[d.ftype] = (byType[d.ftype] || 0) + 1; }); sum.byType = byType; sum.cleared = 0;
+    var bySec = {}; body.forEach(function (b) { var o = bySec[b.section] || (bySec[b.section] = { section: b.section, questions: 0, negative: 0, listed: 0 }); o.questions++; if (NEG.test(b.answer)) o.negative++; if (NEG.test(b.answer) || FLAG.test(b.comment)) o.listed++; });
+    var noComment = out.filter(function (d) { return d.basis === 'answer' && !/\S/.test(body.filter(function (b) { return b.section === d.section && b.no === d.body_no; })[0].comment); });
+    var checks = [
+      { key: 'ans', label: '主文 ' + body.length + ' 題都讀到評語', ok: !sum.unanswered.length, detail: sum.unanswered.slice(0, 8).join('、') },
+      { key: 'neg', label: '評為 No／Fair／Poor 的題目 ' + out.filter(function (d) { return d.basis === 'answer'; }).length + ' 題全部擷取', ok: true, detail: '' },
+      { key: 'flag', label: '評語 Yes、但留言註明另記為 NC／Observation 的題目 ' + out.filter(function (d) { return d.basis === 'comment'; }).length + ' 題一併擷取', ok: true, detail: '' },
+      { key: 'cmt', label: '負面評語都有說明', ok: !noComment.length, detail: noComment.map(function (d) { return d.ref; }).join('、') }
+    ];
+    return { format: 'BSM', mode: 'body', summary: sum, defects: out, detailDefects: picked, onlyInDetail: [], reconcile: secOrder.map(function (k) { return bySec[k]; }), checks: checks,
+      ok: out.length > 0 && !sum.unanswered.length };
+  }
   /** BSM（Ship Inspection Report＋附錄「SUPERINTENDENT VESSEL INSPECTION」缺失單）：附錄逐項擷取，並與主文評為負面的題目交叉比對 */
   function parseBsmPages(pages) {
     var sum = { format: 'BSM', defects: null, tasks: null, score: '', categories: {}, date: '', date_to: '', by: '', at: '', type: 'Ship Inspection Report', vessel: '', imo: '', company: 'BSM', status: '', comments: '', report_date: '' };
@@ -1186,6 +1221,9 @@ var PSC = (function () {
       });
     });
     var negatives = body.filter(function (b) { return NEG.test(b.answer); });
+    var FLAG = /recorded\s+(separately\s+)?as\s+(an?\s+)?(NC|non-?conformit\w*|observation|finding|\w+\s+assessment finding)|recorded separately|\bNC\b/i;
+    var secOrder = []; body.forEach(function (b) { if (secOrder.indexOf(b.section) < 0) secOrder.push(b.section); });
+    if (appendixAt < 0) return bsmBodyOnly(sum, body, secOrder, NEG, FLAG);
     // 附錄缺失單
     var defects = [], cols = null, it = null, field = '';
     var LABELS = [[/^Question\s*:?\s*/, 'question'], [/^Description\s*:\s*/, 'finding'], [/^SOC\/NOC$/, 'x'], [/^SOC Type\s*:\s*/, 'soc_type'], [/^SOC Level 1\s*:\s*/, 'soc1'], [/^SOC Level 2\s*:\s*/, 'soc2'], [/^SOC Level 3\s*:\s*/, 'soc3'], [/^NOC\s*:\s*/, 'noc'], [/^Immediate Cause(-Substandard)?\s*/, 'imm'], [/^Basic\/Root Cause(-Job Factors)?\s*/, 'root'], [/^Corrective Action$/, 'action']];
@@ -1241,7 +1279,7 @@ var PSC = (function () {
   function parseInspectionPages(pages) {
     var head = (pages || []).slice(0, 2).map(function (p) { return (p.items || []).map(function (t) { return t.str; }).join(' '); }).join(' ');
     if (/Shipsure Version|INSPECTION SUMMARY/.test(head) && /Ves\. Ref\. No\./.test(head)) return parseShipsurePages(pages);
-    if (/Ship Inspection Report/i.test(head) && (pages || []).some(function (p) { return (p.items || []).some(function (t) { return /SUPERINTENDENT VESSEL INSPECTION|BERNHARD SCHULTE/.test(t.str); }); })) return parseBsmPages(pages);
+    if (/Ship Inspection Report/i.test(head) && (/INSPECTED AT/.test(head) && /Prepared By/.test(head) || (pages || []).some(function (p) { return (p.items || []).some(function (t) { return /SUPERINTENDENT VESSEL INSPECTION|BERNHARD SCHULTE/.test(t.str); }); }))) return parseBsmPages(pages);
     var r = parseVirPages(pages); r.format = 'PARIS'; r.summary.format = 'PARIS'; return r;
   }
 
@@ -1600,7 +1638,7 @@ var PSC = (function () {
       var alerts = [];
       (nk[s(v.imo)] || []).forEach(function (x) {
         var end = x.kind === 'cert' ? x.expiry : (x.due || x.to);
-        if (x.kind === 'condition' && s(x.label) && up(x.label) !== 'NIL') alerts.push('NK 條件：' + x.label);
+        if (x.kind === 'condition') { if (s(x.label) && !/^(NIL|NONE|N\/A|—|-)(\b|\(|$)/i.test(s(x.label)) && !/=\s*None\)?$/i.test(s(x.label))) alerts.push('NK 條件：' + x.label); }
         else if (end && end <= horizon && (x.kind === 'cert' || yes(x.next))) alerts.push((x.kind === 'cert' ? '證書到期 ' : '檢驗截止 ') + x.label + ' ' + end + (end < t ? '（已逾期）' : ''));
       });
       return { vessel: v.vessel, imo: v.imo, company: v.company, management: v.management, chinese: v.chinese,
@@ -1859,6 +1897,548 @@ var PSC = (function () {
     return { imported: done, mode: mode, filled: filled, filledBy: filledBy, conflicts: conflicts, skipped: skipped };
   }
 
+  /* ---------------- 外部 PSC 資料庫（Tokyo MOU 等各 MOU 的檢查／留置紀錄與年度統計）＋港口／國家分析 ---------------- */
+  /** 表格文字 → 二維陣列（自動判斷 Tab、逗號、分號、直線分隔；支援 CSV 引號） */
+  function parseDelimited(text) {
+    text = s(text).replace(/^﻿/, ''); if (!text) return [];
+    var lines = text.split(/\r?\n/).filter(function (l) { return s(l); });
+    var sample = lines.slice(0, 5).join('\n'), cnt = function (c) { return (sample.match(new RegExp(c === '|' ? '\\|' : c, 'g')) || []).length; };
+    var dl = cnt('\t') >= 2 ? '\t' : cnt('|') >= 4 ? '|' : cnt(';') > cnt(',') ? ';' : ',';
+    if (dl === '|') return lines.filter(function (l) { return !/^\s*\|?\s*:?-{3,}/.test(l); }).map(function (l) { return l.replace(/^\s*\||\|\s*$/g, '').split('|').map(s); });
+    var out = [];
+    lines.forEach(function (l) {
+      if (dl === '\t') { out.push(l.split('\t').map(s)); return; }
+      var row = [], cur = '', q = false;
+      for (var i = 0; i < l.length; i++) { var ch = l[i]; if (q) { if (ch === '"' && l[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; } else if (ch === '"') q = true; else if (ch === dl) { row.push(s(cur)); cur = ''; } else cur += ch; }
+      row.push(s(cur)); out.push(row);
+    });
+    return out;
+  }
+  var PORT_COLS = [
+    ['imo', /^(imo|imo\s*(no\.?|number))$/i], ['vessel', /^(ship|vessel|ship\s*name|vessel\s*name|name\s*of\s*ship)$/i], ['flag', /^(flag|flag\s*state)$/i],
+    ['ship_type', /^(ship\s*type|type(\s*of\s*ship)?|vessel\s*type)$/i], ['ro', /^(ro|class|classification(\s*society)?|recognized organi[sz]ation|class(ification)?\s*society)$/i],
+    ['date', /^(date|inspection\s*date|date\s*of\s*(inspection|detention)|detention\s*date|date\s*detained|inspected)$/i],
+    ['port', /^(port|place|port\s*of\s*(inspection|detention)|place\s*of\s*(inspection|detention)|inspection\s*port)$/i],
+    ['country', /^(country|authority|port\s*state|psc\s*authority|member\s*authority)$/i], ['mou', /^(mou|regime)$/i],
+    ['def_count', /^(no\.?\s*of\s*deficiencies|deficiencies\s*(no\.?|count)|def(iciency)?\s*count|number\s*of\s*deficiencies|deficiencies)$/i],
+    ['codes', /^(codes?|deficiency\s*codes?|def\.?\s*codes?)$/i], ['deficiencies', /^(nature\s*of\s*deficienc(y|ies)|deficienc(y|ies)\s*(description|details)|detainable\s*deficienc(y|ies)|grounds?\s*for\s*detention|remarks?)$/i],
+    ['detained', /^(detained|detention|detention\s*\(y\/n\)|detained\s*\(y\/n\))$/i], ['company', /^(company|ism\s*company|doc\s*company|manager)$/i]
+  ];
+  /** 欄位對應：回傳 { 欄位: 欄序 }；header 為第一列 */
+  function guessPortColumns(header) {
+    var map = {};
+    (header || []).forEach(function (h, i) { var t = s(h).replace(/[\s_]+/g, ' ').replace(/[:：]$/, ''); for (var k = 0; k < PORT_COLS.length; k++) if (map[PORT_COLS[k][0]] === undefined && PORT_COLS[k][1].test(t)) { map[PORT_COLS[k][0]] = i; break; } });
+    return map;
+  }
+  function anyDate(v) {
+    v = s(v); var m;
+    if ((m = v.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})/))) return m[3] + '-' + String(+m[2]).padStart(2, '0') + '-' + String(+m[1]).padStart(2, '0');
+    if (/^\d{5}$/.test(v)) { var d = new Date(Date.UTC(1899, 11, 30) + Number(v) * 864e5); return d.toISOString().slice(0, 10); }
+    return isoDate(v) || parseAnyDate(v);
+  }
+  /** 二維陣列 → 外部 PSC 紀錄（未存檔）。opts: { source, mou, detained:'Y' 表示整份是留置名單, country, map } */
+  function portRecordsFrom(rows, opts) {
+    opts = opts || {}; rows = (rows || []).filter(function (r) { return r && r.some(function (c) { return s(c); }); });
+    if (!rows.length) return { records: [], map: {}, skipped: [] };
+    var map = opts.map || guessPortColumns(rows[0]), body = opts.map ? rows : rows.slice(1);
+    var g = function (r, k) { return map[k] === undefined ? '' : s(r[map[k]]); }, recs = [], skipped = [];
+    body.forEach(function (r, i) {
+      var port = up(g(r, 'port')), country = up(g(r, 'country') || opts.country);
+      var pm = port.match(/^(.+?)\s*[,(]\s*([A-Z .'-]+?)\)?$/); if (pm && !country) { port = s(pm[1]); country = s(pm[2]); } else if (pm && up(pm[2]) === country) port = s(pm[1]);
+      var date = anyDate(g(r, 'date')), text = g(r, 'deficiencies'), codeTxt = g(r, 'codes') + ' ' + text;
+      var codes = []; (codeTxt.match(/\b\d{5}\b/g) || []).forEach(function (c) { if (codes.indexOf(c) < 0 || /[;,\n]/.test(codeTxt)) codes.push(c); });
+      var det = g(r, 'detained'), detained = opts.detained === 'Y' ? 'Y' : /^(y|yes|detained|1|true|留置)$/i.test(det) ? 'Y' : /^(n|no|0|false)$/i.test(det) ? 'N' : '';
+      var dc = g(r, 'def_count').replace(/[^\d]/g, '');
+      if (!date || (!port && !country)) { skipped.push({ row: i + (opts.map ? 1 : 2), why: !date ? '讀不到日期' : '沒有港口或國家' }); return; }
+      recs.push({ source: s(opts.source), mou: s(g(r, 'mou') || opts.mou), country: country, port: port, date: date, vessel: up(g(r, 'vessel')), imo: g(r, 'imo').replace(/\D/g, '').slice(0, 7), flag: up(g(r, 'flag')),
+        ship_type: g(r, 'ship_type'), ro: g(r, 'ro'), detained: detained, def_count: dc || (codes.length ? String(codes.length) : ''), codes: codes.join(';'), deficiencies: text.slice(0, 2000), company: g(r, 'company') });
+    });
+    return { records: recs, map: map, skipped: skipped };
+  }
+  var portRecKey = function (r) { return [s(r.imo) || up(r.vessel), isoDate(r.date), up(r.port) || up(r.country)].join('|'); };
+  function importPortPsc(store, user, p) {
+    need(user, 'editor');
+    var recs = p.records || [], have = {}, batch = s(p.batch) || ('B' + String(store.now()).replace(/\D/g, '').slice(0, 12)), added = 0, skipped = 0, updated = 0;
+    store.all('PortPSC').forEach(function (r) { have[portRecKey(r)] = r; });
+    recs.forEach(function (r, i) {
+      if (!isoDate(r.date) || !(s(r.port) || s(r.country))) { skipped++; return; }
+      var k = portRecKey(r), ex = have[k];
+      if (ex) {
+        var patch = {}; ['flag', 'ship_type', 'ro', 'codes', 'deficiencies', 'def_count', 'mou', 'company'].forEach(function (f) { if (!s(ex[f]) && s(r[f])) patch[f] = s(r[f]); });
+        if (s(r.detained) === 'Y' && s(ex.detained) !== 'Y') patch.detained = 'Y';
+        if (Object.keys(patch).length) { store.updateWhere('PortPSC', function (x) { return s(x.rec_id) === s(ex.rec_id); }, patch); updated++; } else skipped++;
+        return;
+      }
+      var row = {}; SCHEMA.PortPSC.forEach(function (c) { row[c] = ''; });
+      Object.assign(row, r, { rec_id: batch + '-' + String(i + 1).padStart(5, '0'), date: isoDate(r.date), port: up(r.port), country: up(r.country), source: s(r.source || p.source), mou: s(r.mou || p.mou), batch: batch, imported_by: user.email, imported_at: store.now() });
+      store.insert('PortPSC', row); have[k] = row; added++;
+    });
+    audit(store, user, 'import_port_psc', batch, (p.source || '') + '：新增 ' + added + '、補齊 ' + updated + '、重複 ' + skipped);
+    return { batch: batch, added: added, updated: updated, skipped: skipped };
+  }
+  /** 年度統計（例：Tokyo MOU 年報 Annex 2 Table 2 各主管機關）：檢查數、有缺失檢查數、缺失數、留置數、留置率；留置率與數字不符的列不收 */
+  function statsFromRows(rows, opts) {
+    opts = opts || {}; var out = [], bad = [];
+    (rows || []).forEach(function (r, i) {
+      var cells = r.map(s).filter(function (c) { return c !== ''; }); if (cells.length < 5) return;
+      var nums = [], name = [];
+      cells.forEach(function (c) { var n = c.replace(/,/g, '').replace(/%$/, '').replace(/^Regional\s*/i, ''); if (/^\d+(\.\d+)?$/.test(n)) nums.push(Number(n)); else if (!nums.length) name.push(c); });
+      if (!name.length || nums.length < 4) return;
+      var nm = name.join(' ').replace(/\s+/g, ' ').trim(); if (/^(authority|flag|total of|ship type)$/i.test(nm)) return;
+      var row;
+      if (nums.length >= 7 && nums[1] === nums[2] + nums[3]) {
+        // Tokyo MOU 年報 Table 2：a 個別船數、b+c 全部檢查、b 初次檢查、c 複查、d 有缺失、e 缺失數、f 留置、(g 區內船數、a/g、f/b)；留置率＝f ÷ b
+        var b = nums[2], f = nums[6], pc = nums.length >= 10 ? nums[9] : undefined, cc = b ? f / b * 100 : 0;
+        if (pc !== undefined && !/^total$/i.test(nm) && Math.abs(cc - pc) > 0.011 && !opts.noCheck) { bad.push({ row: i + 1, name: nm, why: '留置率 ' + pc + '% 與 留置 ' + f + ' ÷ 初次檢查 ' + b + ' = ' + cc.toFixed(2) + '% 不符' }); return; }
+        row = { ships: String(nums[0]), all_inspections: String(nums[1]), inspections: String(b), with_def: String(nums[4]), deficiencies: String(nums[5]), detentions: String(f), detention_rate: cc.toFixed(2) };
+      } else {
+        var ins = nums[0], wd = nums.length >= 5 ? nums[1] : '', def = nums.length >= 5 ? nums[2] : nums[1], det = nums.length >= 5 ? nums[3] : nums[2], pct = nums.length >= 5 ? nums[4] : nums[3];
+        var calc = ins ? det / ins * 100 : 0;
+        if (pct !== undefined && Math.abs(calc - pct) > Math.max(0.15, pct * 0.05) && !opts.noCheck) { bad.push({ row: i + 1, name: nm, why: '留置率 ' + pct + '% 與 留置 ' + det + ' ÷ 檢查 ' + ins + ' = ' + calc.toFixed(2) + '% 不符' }); return; }
+        row = { inspections: String(ins), with_def: wd === '' ? '' : String(wd), deficiencies: String(def), detentions: String(det), detention_rate: pct === undefined ? calc.toFixed(2) : String(pct) };
+      }
+      var cty = mouCountry(nm);
+      out.push(Object.assign({ source: s(opts.source), year: s(opts.year), mou: s(opts.mou), country: cty, port: '', kind: cty === 'TOTAL' ? 'total' : 'authority', by_category: '' }, row));
+    });
+    return { stats: out, rejected: bad };
+  }
+  function importPortStats(store, user, p) {
+    need(user, 'editor');
+    var added = 0, updated = 0, batch = s(p.batch) || ('S' + String(store.now()).replace(/\D/g, '').slice(0, 12));
+    (p.stats || []).forEach(function (r, i) {
+      if (!s(r.year) || !s(r.country)) return;
+      var key = function (x) { return [s(x.year), up(x.mou), up(x.country), up(x.port), up(x.ship_type)].join('|'); }, k = key(r);
+      var row = Object.assign({}, r, { country: up(r.country), port: up(r.port), batch: batch, imported_by: user.email, imported_at: store.now() });
+      if (store.all('PortStats').some(function (x) { return key(x) === k; })) { var patch = {}; Object.keys(row).forEach(function (f) { if (s(row[f]) !== '') patch[f] = row[f]; }); store.updateWhere('PortStats', function (x) { return key(x) === k; }, patch); updated++; }  // 空白欄不覆蓋（例：PDF 解析沒有的常見缺失清單）
+      else { row.stat_id = batch + '-' + String(i + 1).padStart(3, '0'); var full = {}; SCHEMA.PortStats.forEach(function (c) { full[c] = row[c] === undefined ? '' : row[c]; }); store.insert('PortStats', full); added++; }
+    });
+    audit(store, user, 'import_port_stats', batch, '新增 ' + added + '、更新 ' + updated);
+    return { batch: batch, added: added, updated: updated };
+  }
+  function deletePortBatch(store, user, p) {
+    need(user, 'admin'); var b = s(p.batch); if (!b) throw new Error('請指定批次');
+    var t = /^S/.test(b) ? 'PortStats' : 'PortPSC', before = store.all(t).length;
+    store.replaceWhere(t, 'batch', b, []);
+    var n = before - store.all(t).length; audit(store, user, 'delete_port_batch', b, '刪除 ' + n + ' 筆'); return { deleted: n };
+  }
+  /** 各類別的備檢重點（中英）：PSC 常見開單項目 */
+  var CATEGORY_TIPS = {
+    '01': ['證書與文件：證書效期與年度簽署、最低安全配員、船員適任證書與體檢證明、油類／垃圾記錄簿與簽名。', 'Certificates & documents: validity and endorsements, Minimum Safe Manning, crew CoC and medical certificates, Oil/Garbage Record Books signed.'],
+    '02': ['結構狀況：甲板、艙口圍、扶手欄杆與通道鏽蝕破損，臨時修理要有紀錄。', 'Structure: corrosion or damage on deck, hatch coamings, railings and walkways; temporary repairs documented.'],
+    '03': ['水密／風雨密：空氣管與通風筒關閉裝置、艙口蓋墊條、水密門與門把，標示清楚。', 'Water/weathertightness: air-pipe and ventilator closures, hatch cover packing, watertight doors and dogs, markings.'],
+    '04': ['應急系統：應急發電機與應急消防泵試車、應急照明、演習紀錄與船員熟悉度。', 'Emergency systems: emergency generator and fire pump tests, emergency lighting, drills and crew familiarity.'],
+    '05': ['無線電通訊：GMDSS 日週月測試紀錄、EPIRB／SART 與電池效期、備用電源。', 'Radio: GMDSS daily/weekly/monthly tests, EPIRB/SART and battery expiry, reserve source of energy.'],
+    '06': ['貨物作業：貨物繫固手冊、繫固設備檢查與紀錄、吊貨設備證書。', 'Cargo operations: Cargo Securing Manual, lashing equipment inspection records, lifting gear certificates.'],
+    '07': ['防火安全：防火門自閉與不得綁開、防火擋板標示與操作、消防員裝備齊全、固定滅火系統、機艙油污與易燃物。', 'Fire safety: self-closing fire doors not held open, fire dampers marked and operable, firemen\'s outfits complete, fixed systems, oil leaks and combustibles in E/R.'],
+    '08': ['警報：機艙與火警偵測警報測試、警報紀錄與故障修復。', 'Alarms: E/R and fire detection alarm tests, alarm logs and defects rectified.'],
+    '09': ['工作與生活條件：住艙、廚房與冷庫衛生，照明與通風。', 'Working and living conditions: accommodation, galley and provision room hygiene, lighting and ventilation.'],
+    '10': ['航行安全：ECDIS 與海圖更新、航行計劃、航行燈、BNWAS、VDR、羅經誤差紀錄。', 'Safety of navigation: ECDIS/chart corrections, passage plan, navigation lights, BNWAS, VDR, compass error records.'],
+    '11': ['救生設備：救生艇與釋放裝置、救生筏靜水壓力釋放器效期、救生衣燈、EEBD、演習。', 'Life-saving appliances: lifeboats and release gear, liferaft HRU expiry, lifejacket lights, EEBD, drills.'],
+    '12': ['危險貨物：DG 清單與艙單、積載與隔離、文件一致。', 'Dangerous goods: DG manifest, stowage and segregation, documentation consistency.'],
+    '13': ['推進與輔助機械：機艙洩漏、主輔機安全裝置與跳脫測試、舵機。', 'Propulsion & auxiliary machinery: leakages, safety devices and trip tests, steering gear.'],
+    '14': ['防止污染：OWS 15 ppm 警報與停止裝置、焚化爐、垃圾分類與記錄、SOPEP、壓艙水管理與 BWMS。', 'Pollution prevention: OWS 15 ppm alarm/stop, incinerator, garbage segregation and records, SOPEP, ballast water management and BWMS.'],
+    '15': ['ISM 安全管理：程序實際執行、內稽與矯正預防、船員對 SMS 熟悉度、缺失追蹤。ISM 缺失會讓缺失比 × 5。', 'ISM: procedures implemented, internal audit and corrective actions, crew familiarity with SMS. ISM deficiencies weigh ×5 in the deficiency index.'],
+    '16': ['ISPS 保全：門禁與訪客登記、保全區域管制、SSP 執行與演練。', 'ISPS: access control and visitor log, restricted areas, SSP implementation and drills.'],
+    '18': ['MLC 2006：工時休息紀錄、工資與合約、船員申訴程序、伙食與飲水。', 'MLC 2006: hours of rest, wages and SEA, complaint procedure, food and drinking water.'],
+    '99': ['其他：依 PSC 官員指示。', 'Other: as instructed by the PSCO.']
+  };
+  var portNorm = function (v) { return up(v).replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); };
+  var PORT_ALIAS = null;
+  function setPortAliases(v) { PORT_ALIAS = {}; nameList(v).forEach(function (x) { var p = x.split('='); if (p.length === 2) PORT_ALIAS[portNorm(p[0])] = portNorm(p[1]); }); }
+  function portMain(v) { if (!PORT_ALIAS) setPortAliases(DEFAULT_SETTINGS.filter(function (d) { return d.key === 'port_aliases'; })[0].value); var n = portNorm(v); if (PORT_ALIAS[n]) return PORT_ALIAS[n]; var hit = Object.keys(PORT_ALIAS).filter(function (a) { return (' ' + n + ' ').indexOf(' ' + a + ' ') >= 0; })[0]; return hit ? PORT_ALIAS[hit] : n; }
+  function portMatch(rPort, rCountry, q) {
+    var qp = portMain(q.port), qc = portNorm(q.country); rPort = portMain(rPort);
+    if (qc && portNorm(rCountry) !== qc) return false;
+    if (qp) { var p = portNorm(rPort); if (!p) return false; return p === qp || p.indexOf(qp) === 0 || qp.indexOf(p) === 0 || (' ' + p + ' ').indexOf(' ' + qp + ' ') >= 0; }
+    return !!qc;
+  }
+  /**
+   * 港口／國家 PSC 分析。o: { port, country, from, to, ext（PortPSC）, own（本系統檢查，含 defs[]）, stats（PortStats）, settings, shipCodes（本船曾開的代碼） }
+   */
+  function portProfile(o) {
+    if (o.settings && s(o.settings.port_aliases)) setPortAliases(o.settings.port_aliases);
+    var from = isoDate(o.from) || '0000-01-01', to = isoDate(o.to) || '9999-12-31', q = { port: o.port, country: o.country };
+    var inR = function (d) { d = isoDate(d); return !!d && d >= from && d <= to; };
+    var ext = (o.ext || []).filter(function (r) { return inR(r.date) && portMatch(r.port, r.country, q); });
+    var own = (o.own || []).filter(function (i) { return inR(i.date) && portMatch(i.port, i.country, q); });
+    var avg = tmouAvg(o.settings || {});
+    var code = {}, cat = {}, addC = function (c, src, txt, date) { c = normCode(c); if (!c) return; var x = code[c] || (code[c] = { code: c, own: 0, ext: 0, det: 0, text: '', last: '' }); x[src]++; if (src === 'det') x.ext++; if (txt && !x.text) x.text = s(txt).slice(0, 140); if (date > x.last) x.last = date; var k = c.slice(0, 2), y = cat[k] || (cat[k] = { cat: k, name: CATEGORIES[k] || '', own: 0, ext: 0 }); y[src === 'own' ? 'own' : 'ext']++; };
+    var ownDefs = 0, ownIsm = 0, ownDet = 0, ownNil = 0;
+    own.forEach(function (i) { var ds = i.defs || []; if (!Math.max(ds.length, Number(i.def_count) || 0)) ownNil++; if (i.det === true || yes(i.detention)) ownDet++; ds.forEach(function (d) { ownDefs++; if (normCode(d.code).slice(0, 2) === '15') ownIsm++; addC(d.code, 'own', d.nature, isoDate(i.date)); }); var extra = (Number(i.def_count) || 0) - ds.length; if (extra > 0) ownDefs += extra; });
+    var extDet = 0, extDefs = 0;
+    ext.forEach(function (r) { if (s(r.detained) === 'Y') extDet++; extDefs += Number(r.def_count) || 0; var cs = s(r.codes).split(/[;,\s]+/).filter(Boolean), parts = s(r.deficiencies).split(/[;\n]+|\s(?=\d{5}\b)/).map(s).filter(Boolean); cs.forEach(function (c) { var seg = parts.filter(function (x) { return x.indexOf(c) >= 0; })[0] || (parts.length === 1 ? parts[0] : ''); addC(c, s(r.detained) === 'Y' ? 'det' : 'ext', s(seg).replace(new RegExp('^\\D*' + c + '\\s*[-:：.]?\\s*'), ''), isoDate(r.date)); }); });
+    var codes = Object.keys(code).map(function (k) { var x = code[k]; x.total = x.own + x.ext; x.ship = (o.shipCodes || []).indexOf(k) >= 0; return x; }).sort(function (a, b) { return b.total - a.total || b.det - a.det || (a.code < b.code ? -1 : 1); });
+    var cats = Object.keys(cat).map(function (k) { var y = cat[k]; y.total = y.own + y.ext; y.tip = CATEGORY_TIPS[k] || CATEGORY_TIPS['99']; return y; }).sort(function (a, b) { return b.total - a.total; });
+    // 每月（本船隊檢查缺失比、外部留置數）
+    var mon = {}; own.forEach(function (i) { var m = isoDate(i.date).slice(0, 7), x = mon[m] || (mon[m] = { m: m, n: 0, sc: 0, det: 0, ext: 0 }); x.n++; x.sc += inspScore(i); if (i.det === true || yes(i.detention)) x.det++; });
+    ext.forEach(function (r) { var m = isoDate(r.date).slice(0, 7), x = mon[m] || (mon[m] = { m: m, n: 0, sc: 0, det: 0, ext: 0 }); x.ext++; if (s(r.detained) === 'Y') x.det++; });
+    var months = Object.keys(mon).sort().map(function (k) { var x = mon[k]; return { m: k, n: x.n, idx: x.n ? x.sc / x.n : null, det: x.det, ext: x.ext }; });
+    // 年度統計（國家層級）
+    var cq = portNorm(o.country || (own[0] && own[0].country) || (ext[0] && ext[0].country) || '');
+    // 年度統計以主管機關為單位：港口本身是主管機關時（例：香港）優先用它，否則用國家
+    var byAuth = function (name) { return (o.stats || []).filter(function (r) { return portNorm(r.country) === name && !s(r.port) && !s(r.ship_type) && (!o.mou || !s(r.mou) || up(r.mou) === up(o.mou)); }).sort(function (a, b) { return s(a.year) < s(b.year) ? 1 : -1; }); };
+    var pm = q.port ? portMain(q.port) : '', st = pm && byAuth(pm).length ? byAuth(pm) : byAuth(cq);
+    var refMou = s(o.mou) || (st[0] && s(st[0].mou)) || '';
+    var tot = (o.stats || []).filter(function (r) { return /^(TOTAL|ALL|TOKYO MOU TOTAL)$/.test(portNorm(r.country)) && !s(r.ship_type) && (!refMou || !s(r.mou) || up(r.mou) === up(refMou)) && (!st[0] || s(r.year) === s(st[0].year)); })[0] || null;
+    var mref = refMou ? mouReference(o.stats, refMou) : null;
+    var nat = st[0] ? { year: st[0].year, mou: st[0].mou, source: st[0].source, inspections: +st[0].inspections, deficiencies: +st[0].deficiencies, detentions: +st[0].detentions, rate: +st[0].detention_rate, defPerInsp: +st[0].inspections ? +st[0].deficiencies / +st[0].inspections : null } : null;
+    var mou = tot ? { year: tot.year, inspections: +tot.inspections, deficiencies: +tot.deficiencies, detentions: +tot.detentions, rate: +tot.detention_rate, defPerInsp: +tot.inspections ? +tot.deficiencies / +tot.inspections : null } : null;
+    var ownIdx = own.length ? (ownIsm * 5 + (ownDefs - ownIsm)) / own.length : null;
+    return { query: { port: up(o.port), country: up(o.country || cq), from: from === '0000-01-01' ? '' : from, to: to === '9999-12-31' ? '' : to },
+      own: { inspections: own.length, nil: ownNil, defs: ownDefs, ism: ownIsm, det: ownDet, index: ownIdx, perInsp: own.length ? ownDefs / own.length : null, recent: own.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 8) },
+      ext: { records: ext.length, detentions: extDet, defs: extDefs, recentDet: ext.filter(function (r) { return s(r.detained) === 'Y'; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 10) },
+      codes: codes, categories: cats, months: months, national: nat, mouTotal: mou, avg: avg, mouRef: mref,
+      shipOverlap: codes.filter(function (c) { return c.ship; }) };
+  }
+  /* ---------------- MOU 年報統計：內建已核對資料、年報 PDF 文字解析、自動檢查 ---------------- */
+  /** 年報上的主管機關名稱 → 本系統國家名稱 */
+  var MOU_COUNTRY_ALIAS = { 'HONG KONG CHINA': 'HONG KONG', 'HONG KONG, CHINA': 'HONG KONG', 'REPUBLIC OF KOREA': 'SOUTH KOREA', 'KOREA': 'SOUTH KOREA', 'KOREA, REPUBLIC OF': 'SOUTH KOREA', 'RUSSIAN FEDERATION': 'RUSSIA', 'VIET NAM': 'VIETNAM', 'UNITED STATES': 'USA', 'UNITED STATES OF AMERICA': 'USA', 'UNITED ARAB EMIRATES': 'UAE', 'TOTAL': 'TOTAL' };
+  function mouCountry(v) { var n = up(v).replace(/\s*\d+(?:\s*[&,]\s*\d+)*\)\s*$/, '').replace(/\s+/g, ' ').trim(); return MOU_COUNTRY_ALIAS[n] || MOU_COUNTRY_ALIAS[n.replace(/,/g, '')] || n; }
+  var TMOU_AUTHORITIES = ['Hong Kong, China', 'Papua New Guinea', 'Republic of Korea', 'Russian Federation', 'Marshall Islands', 'New Zealand', 'Philippines', 'Australia', 'Indonesia', 'Singapore', 'Malaysia', 'Thailand', 'Viet Nam', 'Vanuatu', 'Canada', 'Mexico', 'Panama', 'Chile', 'China', 'Japan', 'Peru', 'Fiji'];
+  /** Tokyo MOU 年報 Table 7 類別 → 本系統缺失代碼大類 */
+  var TMOU_CATS = [['Crew Certificates', '01'], ['Documents', '01'], ['Ship Certificates', '01'], ['Structural Conditions', '02'], ['Water/Weathertight conditions', '03'], ['Emergency Systems', '04'], ['Radio Communications', '05'], ['Cargo operations including equipment', '06'], ['Fire safety', '07'], ['Alarms', '08'], ['Safety of Navigation', '10'], ['Life saving appliances', '11'], ['Dangerous goods', '12'], ['Propulsion and auxiliary machinery', '13'], ['Industrial Personnel', '99'], ['Living Conditions', '09'], ['Working Conditions', '09'], ['Minimum requirements for seafarers', '18'], ['Conditions of employment', '18'], ['Accommodation, recreational facilities, food and catering', '18'], ['Health protection, medical care, social security', '18'], ['Anti Fouling', '14'], ['Ballast Water', '14'], ['MARPOL Annex I', '14'], ['MARPOL Annex II', '14'], ['MARPOL Annex III', '14'], ['MARPOL Annex IV', '14'], ['MARPOL Annex V', '14'], ['MARPOL Annex VI', '14'], ['ISM', '15'], ['Other', '99']];
+  /** Paris MOU 年報「Major categories of deficiencies」主要類別 → 本系統大類（約略對應：Paris MOU 依公約章節分類） */
+  var PMOU_CATS = [['Ballast Water Management', '14'], ['COLREG', '10'], ['Load Lines', '03'], ['MARPOL Annex I', '14'], ['MARPOL Annex IV', '14'], ['MARPOL Annex V', '14'], ['MARPOL Annex VI', '14'], ['MARPOL Other', '14'], ['MLC, 2006 Title 1', '18'], ['MLC, 2006 Title 2', '18'], ['MLC, 2006 Title 3', '18'], ['MLC, 2006 Title 4', '18'], ['MLC, 2006 Title 5', '18'], ['SOLAS chapter I', '01'], ['SOLAS chapter II-1', '13'], ['SOLAS chapter II-2', '07'], ['SOLAS chapter III', '11'], ['SOLAS chapter IV', '05'], ['SOLAS chapter V', '10'], ['SOLAS chapter VI', '06'], ['SOLAS chapter XI-1', '01'], ['SOLAS ISM Code', '15'], ['SOLAS ISPS Code', '16'], ['SOLAS LSA Code', '11'], ['SOLAS Other', '99'], ['STCW Code Part A chapter I', '01'], ['STCW Code Part A chapter VIII', '01'], ['STCW Other', '01'], ['Other', '99']];
+  var MOU_CAT_ZH = { 'Crew Certificates': '船員證書', 'Documents': '文件', 'Ship Certificates': '船舶證書', 'Structural Conditions': '結構狀況', 'Water/Weathertight conditions': '水密／風雨密', 'Emergency Systems': '應急系統', 'Radio Communications': '無線電通訊', 'Cargo operations including equipment': '貨物作業與設備', 'Fire safety': '防火安全', 'Alarms': '警報', 'Safety of Navigation': '航行安全', 'Life saving appliances': '救生設備', 'Dangerous goods': '危險貨物', 'Propulsion and auxiliary machinery': '推進與輔助機械', 'Industrial Personnel': '工業人員', 'Living Conditions': '生活條件', 'Working Conditions': '工作條件', 'Minimum requirements for seafarers': 'MLC 船員最低要求', 'Conditions of employment': 'MLC 僱用條件', 'Accommodation, recreational facilities, food and catering': 'MLC 住艙、休閒、伙食', 'Health protection, medical care, social security': 'MLC 健康保護、醫療、社會保障', 'Anti Fouling': '防污底', 'Ballast Water': '壓艙水', 'ISM': 'ISM', 'Other': '其他',
+    'Ballast Water Management': '壓艙水管理', 'Load Lines': '載重線', 'MARPOL Other': 'MARPOL 其他', 'MLC, 2006 Title 1': 'MLC 第 1 章 最低要求', 'MLC, 2006 Title 2': 'MLC 第 2 章 僱用條件', 'MLC, 2006 Title 3': 'MLC 第 3 章 住艙與伙食', 'MLC, 2006 Title 4': 'MLC 第 4 章 健康保護與醫療', 'MLC, 2006 Title 5': 'MLC 第 5 章 遵守與執行', 'SOLAS chapter I': 'SOLAS 第 I 章 證書', 'SOLAS chapter II-1': 'SOLAS II-1 構造、機械、電氣', 'SOLAS chapter II-2': 'SOLAS II-2 防火', 'SOLAS chapter III': 'SOLAS III 救生設備', 'SOLAS chapter IV': 'SOLAS IV 無線電', 'SOLAS chapter V': 'SOLAS V 航行安全', 'SOLAS chapter VI': 'SOLAS VI 貨物', 'SOLAS chapter XI-1': 'SOLAS XI-1 加強安全措施', 'SOLAS ISM Code': 'ISM 章程', 'SOLAS ISPS Code': 'ISPS 章程', 'SOLAS LSA Code': 'LSA 章程', 'SOLAS Other': 'SOLAS 其他', 'STCW Code Part A chapter I': 'STCW A-I 一般規定', 'STCW Code Part A chapter VIII': 'STCW A-VIII 當值與休息', 'STCW Other': 'STCW 其他',
+    'Fixed fire extinguishing installation': '固定式滅火系統', 'Lifeboats': '救生艇', 'Ventilators, air pipes, casings': '通風筒、空氣管、圍壁', 'Fire pumps and its pipes': '消防泵與管路', 'Fire detection and alarm system': '火警偵測與警報系統', 'Remote means of control (opening, pumps, ventilation, etc.) machinery spaces': '機艙遙控關斷（開口、泵、通風等）', 'Fire-dampers': '防火擋板', 'Maintenance of the ship and equipment': '船舶與設備維護（ISM）', 'Oil filtering equipment': '油水分離設備', 'Fire doors/openings in fire-resisting divisions': '防火門／防火區劃開口', "Seafarers' employment agreement (SEA)": '船員僱用契約（SEA）', 'Cleanliness of engine room': '機艙清潔', 'Electrical installations in general': '電氣設備（一般）' };
+  function mouCatZh(n) { return MOU_CAT_ZH[n] || MOU_CAT_ZH[String(n).replace(/^MARPOL /, '')] || (/^MARPOL Annex/.test(n) ? n.replace('MARPOL Annex', 'MARPOL 附則') : n); }
+  /**
+   * 內建、已核對的 MOU 年報統計（官方公開年報，非商業用途並註明出處）。
+   * 核對：Tokyo MOU 各主管機關各欄加總＝Total 列、每列留置率＝留置 ÷ 初次檢查；Table 7 類別合計＝缺失總數。
+   * Paris MOU 年報沒有各港口國的統計，只有全區、船型、缺失類別。
+   */
+  var MOU_DATA = [
+    { id: 'TMOU-2025', mou: 'Tokyo MOU', year: '2025', published: '2026-05-01', source: 'Tokyo MOU Annual Report 2025', url: 'https://www.tokyo-mou.org/wp/wp-content/uploads/ANN25.pdf',
+      basis: '檢查數為初次檢查；留置率＝留置 ÷ 初次檢查（年報 f/b）；缺失與留置不含保全（ISPS）項目',
+      // [主管機關, a 個別船數, b+c 全部檢查, b 初次, c 複查, d 有缺失, e 缺失數, f 留置, g 區內船數, a/g %, f/b %]
+      authorities: [['Australia', 2508, 4617, 2769, 1848, 1722, 7560, 133, 6224, 40.30, 4.80], ['Canada', 620, 641, 640, 1, 516, 3152, 30, 2272, 27.29, 4.69], ['Chile', 711, 1612, 767, 845, 528, 1498, 9, 1974, 36.02, 1.17], ['China', 7464, 14694, 9894, 4800, 9394, 40575, 689, 20093, 37.15, 6.96], ['Fiji', 18, 41, 32, 9, 3, 28, 1, 247, 7.29, 3.13], ['Hong Kong, China', 601, 961, 603, 358, 342, 978, 12, 1474, 40.77, 1.99], ['Indonesia', 2699, 4137, 3736, 401, 1212, 3003, 37, 9673, 27.90, 0.99], ['Japan', 2880, 5037, 4014, 1023, 2795, 11175, 101, 8835, 32.60, 2.52], ['Republic of Korea', 1662, 2321, 1876, 445, 1509, 6057, 102, 10939, 15.19, 5.44], ['Malaysia', 1063, 1381, 1184, 197, 520, 1367, 3, 10632, 10.00, 0.25], ['Marshall Islands', 11, 17, 12, 5, 8, 71, 1, 30, 36.67, 8.33], ['Mexico', 518, 609, 564, 45, 64, 108, 0, 1652, 31.36, 0], ['New Zealand', 266, 467, 303, 164, 198, 929, 10, 1004, 26.49, 3.30], ['Panama', 163, 206, 183, 23, 59, 228, 6, 4002, 4.07, 3.28], ['Papua New Guinea', 140, 230, 175, 55, 76, 211, 3, 583, 24.01, 1.71], ['Peru', 1314, 1668, 1554, 114, 70, 123, 6, 2087, 62.96, 0.39], ['Philippines', 1505, 2385, 1941, 444, 1454, 2965, 9, 3572, 42.13, 0.46], ['Russian Federation', 578, 1732, 869, 863, 739, 4161, 49, 1155, 50.04, 5.64], ['Singapore', 494, 818, 528, 290, 466, 2590, 45, 16548, 2.99, 8.52], ['Thailand', 709, 928, 822, 106, 318, 662, 6, 4217, 16.81, 0.73], ['Vanuatu', 4, 4, 4, 0, 1, 2, 0, 65, 6.15, 0], ['Viet Nam', 2489, 3647, 3076, 571, 1236, 2725, 3, 6182, 40.26, 0.10]],
+      total: { ships: 19980, all_inspections: 48153, inspections: 35546, with_def: 23230, deficiencies: 90168, detentions: 1255, detention_rate: 3.53 },
+      categories: [['Crew Certificates', 978], ['Documents', 3472], ['Ship Certificates', 1617], ['Structural Conditions', 3263], ['Water/Weathertight conditions', 6651], ['Emergency Systems', 5950], ['Radio Communications', 1577], ['Cargo operations including equipment', 897], ['Fire safety', 18020], ['Alarms', 1243], ['Safety of Navigation', 8936], ['Life saving appliances', 11818], ['Dangerous goods', 284], ['Propulsion and auxiliary machinery', 5787], ['Industrial Personnel', 2], ['Living Conditions', 343], ['Working Conditions', 1336], ['Minimum requirements for seafarers', 28], ['Conditions of employment', 348], ['Accommodation, recreational facilities, food and catering', 1920], ['Health protection, medical care, social security', 5133], ['Anti Fouling', 14], ['Ballast Water', 3252], ['MARPOL Annex I', 1860], ['MARPOL Annex II', 26], ['MARPOL Annex III', 17], ['MARPOL Annex IV', 1211], ['MARPOL Annex V', 1131], ['MARPOL Annex VI', 1251], ['ISM', 1334], ['Other', 469]],
+      catTotal: 90168, catRef: 'Table 7（另有 ISPS 保全缺失 1,061 項，不含在總數內）',
+      topLabel: '最常見的留置缺失（Figure 8，依圖中排序）', top: [['Fixed fire extinguishing installation', 215, '07'], ['ISM', 200, '15'], ['Lifeboats', 152, '11'], ['Ventilators, air pipes, casings', 138, '03'], ['Fire pumps and its pipes', 118, '07'], ['Fire detection and alarm system', 114, '07'], ['Remote means of control (opening, pumps, ventilation, etc.) machinery spaces', 109, '07'], ['Fire-dampers', 106, '07'], ['Maintenance of the ship and equipment', 104, '15'], ['Oil filtering equipment', 92, '14']],
+      shipTypes: [{ ship_type: 'CONTAINER', inspections: 6881, with_def: 4316, deficiencies: 14192, detentions: 158, detention_rate: 2.30, ref: 'Table 5' }],
+      refs: 'Annex 2 Table 2（p.23）、Table 5（p.31）、Table 7（p.35）、Figure 8（p.17）' },
+    { id: 'PMOU-2025', mou: 'Paris MOU', year: '2025', published: '2026-07-01', source: 'Paris MoU Annual Report 2025', url: 'https://parismou.org/system/files/2026-06/Paris%20MoU%20Annual%20Report%202025.pdf',
+      basis: '全區統計；年報沒有各港口國的分項。缺失類別依公約章節（SOLAS、MLC、MARPOL…），本系統大類為約略對應',
+      authorities: [],
+      total: { inspections: 16474, with_def: 9879, deficiencies: 51797, detentions: 688, detention_rate: 4.18 },
+      categories: [['Ballast Water Management', 1591], ['COLREG', 488], ['Load Lines', 2637], ['MARPOL Annex I', 1593], ['MARPOL Annex IV', 486], ['MARPOL Annex V', 859], ['MARPOL Annex VI', 979], ['MARPOL Other', 43], ['MLC, 2006 Title 1', 124], ['MLC, 2006 Title 2', 1230], ['MLC, 2006 Title 3', 3752], ['MLC, 2006 Title 4', 5225], ['MLC, 2006 Title 5', 403], ['SOLAS chapter I', 622], ['SOLAS chapter II-1', 6004], ['SOLAS chapter II-2', 8713], ['SOLAS chapter III', 4815], ['SOLAS chapter IV', 859], ['SOLAS chapter V', 3952], ['SOLAS chapter VI', 242], ['SOLAS chapter XI-1', 432], ['SOLAS ISM Code', 2348], ['SOLAS ISPS Code', 327], ['SOLAS LSA Code', 517], ['SOLAS Other', 1147], ['STCW Code Part A chapter I', 469], ['STCW Code Part A chapter VIII', 733], ['STCW Other', 691], ['Other', 483]],
+      catTotal: 51764, catRef: 'Major categories of deficiencies（p.32）；各類合計 51,764，全部缺失 51,797',
+      topLabel: '最常見的缺失（Top 5 deficiencies，p.33）', top: [['ISM', 2322, '15'], ['Fire doors/openings in fire-resisting divisions', 1609, '07'], ["Seafarers' employment agreement (SEA)", 664, '18'], ['Cleanliness of engine room', 654, '13'], ['Electrical installations in general', 646, '13']],
+      shipTypes: [{ ship_type: 'CONTAINER', inspections: 1866, with_def: 1090, ships: 1707, detentions: 37, detention_rate: 1.98, ref: 'p.30' }],
+      refs: 'Basic figures（p.9、p.14）、Inspections and detentions per ship type（p.30）、Major categories（p.32）、Top 5（p.33）' }
+  ];
+  var PMOU_TOP_CODE = { 'ISM': '15', 'Fire doors/openings in fire-resisting divisions': '07', "Seafarers' employment agreement (SEA)": '18', 'Cleanliness of engine room': '13', 'Electrical installations in general': '13' };
+  var MOU_CAT_DEF = { 'Tokyo MOU': TMOU_CATS, 'Paris MOU': PMOU_CATS };
+  function catCode(mou, name) { var t = MOU_CAT_DEF[mou] || TMOU_CATS, h = t.filter(function (x) { return x[0] === name; })[0]; return h ? h[1] : '99'; }
+  /** 一份年報資料（內建或解析結果）→ PortStats 列；核對失敗丟出錯誤 */
+  function mouStatsRows(ds, opts) {
+    opts = opts || {}; var chk = mouChecks(ds); if (!chk.ok && !opts.force) throw new Error(ds.mou + ' ' + ds.year + ' 核對未通過：' + chk.items.filter(function (c) { return !c.ok; }).map(function (c) { return c.what; }).join('；'));
+    var base = { source: ds.source, year: s(ds.year), mou: ds.mou, port: '', ref: ds.url || '', note: ds.basis || '' };
+    var rows = (ds.authorities || []).map(function (a) { return Object.assign({}, base, { kind: 'authority', country: mouCountry(a[0]), ships: String(a[1]), all_inspections: String(a[2]), inspections: String(a[3]), with_def: String(a[5]), deficiencies: String(a[6]), detentions: String(a[7]), detention_rate: (a[3] ? a[7] / a[3] * 100 : 0).toFixed(2), by_category: '', top_items: '' }); });
+    var t = ds.total || {}, cats = (ds.categories || []).map(function (c) { return { name: c[0], n: c[1], code: catCode(ds.mou, c[0]) }; });
+    rows.push(Object.assign({}, base, { kind: 'total', country: 'TOTAL', ships: s(t.ships), all_inspections: s(t.all_inspections), inspections: s(t.inspections), with_def: s(t.with_def), deficiencies: s(t.deficiencies), detentions: s(t.detentions), detention_rate: s(t.detention_rate),
+      by_category: cats.length ? JSON.stringify({ total: ds.catTotal || cats.reduce(function (a, c) { return a + c.n; }, 0), ref: ds.catRef || '', cats: cats }) : '',
+      top_items: (ds.top || []).length ? JSON.stringify({ label: ds.topLabel || '', items: ds.top.map(function (x) { return { name: x[0], n: x[1], code: x[2] || '' }; }) }) : '' }));
+    (ds.shipTypes || []).forEach(function (st) { rows.push(Object.assign({}, base, { kind: 'shiptype', country: 'TOTAL', ship_type: up(st.ship_type), ships: s(st.ships), inspections: String(st.inspections), with_def: s(st.with_def), deficiencies: s(st.deficiencies), detentions: String(st.detentions), detention_rate: String(st.detention_rate), note: (base.note ? base.note + '；' : '') + (st.ref || ''), by_category: '', top_items: '' })); });
+    return rows;
+  }
+  /** 年報資料的一致性核對：每列留置率、各欄加總＝Total、類別合計 */
+  function mouChecks(ds) {
+    var items = [], add = function (ok, what) { items.push({ ok: !!ok, what: what }); }, A = ds.authorities || [], t = ds.total || {};
+    if (A.length) {
+      var badRows = A.filter(function (a) { return a[2] !== a[3] + a[4] || (a.length > 10 && Math.abs((a[3] ? a[7] / a[3] * 100 : 0) - a[10]) > 0.011); });
+      add(!badRows.length, badRows.length ? '列內數字不一致：' + badRows.map(function (a) { return a[0]; }).join('、') : A.length + ' 個主管機關：初次＋複查＝全部檢查、留置率＝留置 ÷ 初次檢查');
+      var cols = [[2, 'all_inspections', '全部檢查'], [3, 'inspections', '初次檢查'], [5, 'with_def', '有缺失檢查'], [6, 'deficiencies', '缺失數'], [7, 'detentions', '留置']];
+      var off = cols.filter(function (c) { return A.reduce(function (x, a) { return x + a[c[0]]; }, 0) !== Number(t[c[1]]); });
+      add(!off.length, off.length ? '加總與 Total 不符：' + off.map(function (c) { return c[2]; }).join('、') : '各欄加總＝Total 列（' + cols.map(function (c) { return c[2] + ' ' + Number(t[c[1]]).toLocaleString('en-US'); }).join('、') + '）');
+    }
+    if (t.inspections) add(Math.abs(t.detentions / t.inspections * 100 - Number(t.detention_rate)) <= 0.011, '全區留置率 ' + t.detention_rate + '%＝' + t.detentions + ' ÷ ' + t.inspections);
+    else add(false, '找不到全區檢查數');
+    if ((ds.categories || []).length) {
+      var sum = ds.categories.reduce(function (a, c) { return a + c[1]; }, 0);
+      add(!ds.catTotal || sum === ds.catTotal, '缺失類別合計 ' + sum.toLocaleString('en-US') + (ds.catTotal && sum !== ds.catTotal ? ' 與表上合計 ' + ds.catTotal + ' 不符' : ''));
+      if (ds.mou !== 'Paris MOU' && t.deficiencies) add(sum === Number(t.deficiencies), '缺失類別合計＝缺失總數 ' + Number(t.deficiencies).toLocaleString('en-US'));
+    }
+    (ds.shipTypes || []).forEach(function (st) { add(Math.abs(st.detentions / st.inspections * 100 - st.detention_rate) <= 0.011 && (!st.with_def || st.with_def <= st.inspections), st.ship_type + ' 留置率 ' + st.detention_rate + '%＝' + st.detentions + ' ÷ ' + st.inspections); });
+    return { ok: items.every(function (c) { return c.ok; }), items: items };
+  }
+  /** PDF 每頁文字（pdf.js items：str、x、y）→ 依座標組成文字列 */
+  function pagesToText(pages) {
+    return (pages || []).map(function (p) {
+      var rows = [];
+      (p.items || []).slice().sort(function (a, b) { return a.y - b.y || a.x - b.x; }).forEach(function (it) { var r = rows.filter(function (x) { return Math.abs(x.y - it.y) <= 2.5; })[0]; if (!r) rows.push(r = { y: it.y, items: [] }); r.items.push(it); });
+      return rows.sort(function (a, b) { return a.y - b.y; }).map(function (r) { return r.items.sort(function (a, b) { return a.x - b.x; }).map(function (i) { return s(i.str); }).join(' ').replace(/\s+/g, ' ').trim(); }).join('\n');
+    }).join('\n\f\n');
+  }
+  var numT = function (x) { return Number(String(x).replace(/,/g, '')); };
+  var reEsc = function (x) { return String(x).replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&'); };
+  /**
+   * 年報 PDF 的文字（pdf.js 或 Google 文件轉檔）→ 年報資料。
+   * Tokyo MOU：Table 2 各主管機關、Total 列、Table 5 貨櫃船、Table 7 缺失類別。Paris MOU：基本數字、貨櫃船、主要缺失類別、Top 5。
+   * 回傳 { ds, checks, ok }；ok 為 false 時不應自動匯入。
+   */
+  function parseMouAnnual(text, opts) {
+    opts = opts || {}; var T = String(text || '').replace(/ /g, ' '), flat = T.replace(/[|\t\r\n\f]+/g, ' ').replace(/ {2,}/g, ' ');
+    var isParis = /Paris\s+MoU/i.test(flat) && !/Asia-Pacific Region/i.test(flat), mou = opts.mou || (isParis ? 'Paris MOU' : 'Tokyo MOU');
+    var ym = flat.match(isParis ? /Annual Report (?:on Port State Control )?(20\d\d)/i : /Asia-Pacific Region,? (20\d\d)|Statistics for (20\d\d)|Annual Report (?:on Port State Control )?(20\d\d)/i), year = s(opts.year) || (ym ? (ym[1] || ym[2] || ym[3]) : '');
+    var ds = { mou: mou, year: year, source: opts.source || (mou === 'Paris MOU' ? 'Paris MoU Annual Report ' : 'Tokyo MOU Annual Report ') + year, url: opts.url || '', basis: '', authorities: [], total: {}, categories: [], shipTypes: [], top: [] };
+    var N = '([\\d,]+(?:\\.\\d+)?)', SP = '\\s+';
+    if (mou === 'Tokyo MOU') {
+      ds.basis = '檢查數為初次檢查；留置率＝留置 ÷ 初次檢查（年報 f/b）；缺失與留置不含保全（ISPS）項目';
+      var work = flat;
+      TMOU_AUTHORITIES.forEach(function (name) {
+        var re = new RegExp('(^|[\\s(])' + reEsc(name).replace(/ /g, '\\s+') + '\\s*(?:\\d(?:\\s*[&,]\\s*\\d)*\\))?\\s+' + [N, N, N, N, N, N, N, N, N, N].join(SP), 'g'), m;
+        while ((m = re.exec(work))) {
+          var v = m.slice(2, 12).map(numT);
+          if (work.charAt(m.index - 1) !== ',' && v[1] === v[2] + v[3] && Math.abs((v[2] ? v[6] / v[2] * 100 : 0) - v[9]) <= 0.011 && v[4] <= v[2]) { ds.authorities.push([name].concat(v)); work = work.slice(0, m.index) + ' '.repeat(m[0].length) + work.slice(m.index + m[0].length); break; }
+        }
+      });
+      ds.authorities.sort(function (a, b) { return a[0] < b[0] ? -1 : 1; });
+      var sums = [1, 2, 3, 4, 5, 6, 7].map(function (i) { return ds.authorities.reduce(function (x, a) { return x + a[i]; }, 0); });
+      var reT = new RegExp('Total\\s+' + [N, N, N, N, N, N, N].join(SP), 'g'), mt, totals = [];
+      while ((mt = reT.exec(flat))) totals.push(mt.slice(1, 8).map(numT));
+      var hit = totals.filter(function (v) { return v[1] === sums[1] && v[2] === sums[2] && v[5] === sums[5] && v[6] === sums[6]; })[0] || totals.filter(function (v) { return v[1] === v[2] + v[3] && v[6] / v[2] < 0.2; })[0];
+      if (hit) ds.total = { ships: hit[0], all_inspections: hit[1], inspections: hit[2], with_def: hit[4], deficiencies: hit[5], detentions: hit[6], detention_rate: Number((hit[6] / hit[2] * 100).toFixed(2)) };
+      var mr = flat.match(/Detention percentage[^%]{0,40}Regional\s*([\d.]+)\s*%/i) || flat.match(/Regional\s+[\d,]+\s+Regional\s+[\d.]+%?\s+Regional\s+([\d.]+)%/i); if (mr && ds.total.inspections) ds.statedRate = Number(mr[1]);
+      var reC = new RegExp('Container ship\\s+' + [N, N, N, N, N].join(SP), 'g'), mc;
+      while ((mc = reC.exec(flat))) { var c = mc.slice(1, 6).map(numT); if (c[1] <= c[0] && Math.abs(c[3] / c[0] * 100 - c[4]) <= 0.011 && c[4] < 50) { ds.shipTypes.push({ ship_type: 'CONTAINER', inspections: c[0], with_def: c[1], deficiencies: c[2], detentions: c[3], detention_rate: c[4], ref: 'Table 5' }); break; } }
+      // Table 7：從「Crew Certificates <數字>」起到「Grand total」
+      var st7 = flat.search(/Crew Certificates\s+[\d,]+/), en7 = st7 >= 0 ? flat.indexOf('Grand total', st7) : -1;
+      if (st7 >= 0) {
+        var reg = flat.slice(st7, en7 > 0 ? en7 + 40 : st7 + 3000), cs = [];
+        TMOU_CATS.slice().sort(function (a, b) { return b[0].length - a[0].length; }).forEach(function (c) { var m7 = reg.match(new RegExp('(^|[\\s(])' + reEsc(c[0]).replace(/ /g, '\\s+') + '\\s+' + N + '(?![\\d.%])')); if (m7) { cs.push([c[0], numT(m7[2])]); reg = reg.slice(0, m7.index) + ' '.repeat(m7[0].length) + reg.slice(m7.index + m7[0].length); } });
+        cs.sort(function (a, b) { return TMOU_CATS.map(function (x) { return x[0]; }).indexOf(a[0]) - TMOU_CATS.map(function (x) { return x[0]; }).indexOf(b[0]); });
+        var tm = reg.match(/Total\s+([\d,]+)\s+ISPS\s+([\d,]+)/i); if (tm) { ds.catTotal = numT(tm[1]); ds.catRef = 'Table 7（另有 ISPS 保全缺失 ' + tm[2] + ' 項，不含在總數內）'; }
+        if (cs.length >= 20) ds.categories = cs;
+      }
+    } else {
+      ds.basis = '全區統計；年報沒有各港口國的分項。缺失類別依公約章節（SOLAS、MLC、MARPOL…），本系統大類為約略對應';
+      var g = function (re) { var m = flat.match(re); return m ? numT(m[1]) : null; };
+      var ins = g(/total of ([\d,]+) inspections/i) || g(/([\d,]+) inspections (?:were )?(?:carried out|recorded)/i), wd = g(/([\d,]+) (?:were )?inspections with deficiencies/i), det = g(/([\d,]+) detentions/i), rate = g(/detention rate[^%]{0,60}?(\d+\.\d+)\s*%/i);
+      if (ins && det) ds.total = { inspections: ins, with_def: wd || '', deficiencies: '', detentions: det, detention_rate: rate || Number((det / ins * 100).toFixed(2)) };
+      var mcat = flat.search(/MAJOR CATEGORIES OF DEFICIENCIES/i);
+      if (mcat >= 0) {
+        var regP = flat.slice(mcat, mcat + 4000), cs2 = [];
+        PMOU_CATS.slice().sort(function (a, b) { return b[0].length - a[0].length; }).forEach(function (c) { var m8 = regP.match(new RegExp('(^|[\\s(])' + reEsc(c[0]).replace(/ /g, '\\s+') + '\\s+' + [N, N, N, N, N, N].join(SP))); if (m8) { cs2.push([c[0], numT(m8[6]), Number(m8[7])]); regP = regP.slice(0, m8.index) + ' '.repeat(m8[0].length) + regP.slice(m8.index + m8[0].length); } });
+        cs2.sort(function (a, b) { return PMOU_CATS.map(function (x) { return x[0]; }).indexOf(a[0]) - PMOU_CATS.map(function (x) { return x[0]; }).indexOf(b[0]); });
+        if (cs2.length >= 20) { var sm = cs2.reduce(function (a, c) { return a + c[1]; }, 0); ds.catTotal = sm; ds.catRef = 'Major categories of deficiencies'; ds.categories = cs2.map(function (c) { return [c[0], c[1]]; }); ds.catPctOk = cs2.every(function (c) { return Math.abs(c[1] / sm * 100 - c[2]) <= 0.1; }); }
+      }
+      var mtp = flat.match(/TOP 5 DEFICIENCIES([\s\S]{0,900})/i);
+      if (mtp) { var reTop = /([A-Z][A-Za-z'’()\/ ,.-]+?)\s+[\d,]+\s+[\d.]+\s+[\d,]+\s+[\d.]+\s+([\d,]+)\s+([\d.]+)/g, mm, tops = []; while ((mm = reTop.exec(mtp[1])) && tops.length < 5) { var nm2 = mm[1].replace(/^.*Total deficiencies\s*/i, '').trim(); tops.push([nm2, numT(mm[2]), PMOU_TOP_CODE[nm2] || '']); } if (tops.length) { ds.top = tops; ds.topLabel = '最常見的缺失（Top 5 deficiencies）'; } }
+      if (ds.total.inspections && !ds.total.deficiencies) { var dd = g(/total of ([\d,]+) deficiencies/i) || g(/([\d,]+) deficiencies (?:were )?recorded/i); ds.total.deficiencies = dd || ds.catTotal || ''; }
+      var mcp = flat.match(new RegExp('Container\\s+' + [N, N, N, N, N, N].join(SP)));
+      if (mcp) { var cp = mcp.slice(1, 7).map(numT); if (Math.abs(cp[1] / cp[0] * 100 - cp[2]) <= 0.1 && Math.abs(cp[4] / cp[0] * 100 - cp[5]) <= 0.011) ds.shipTypes.push({ ship_type: 'CONTAINER', inspections: cp[0], with_def: cp[1], ships: cp[3], detentions: cp[4], detention_rate: cp[5], ref: 'per ship type' }); }
+    }
+    var chk = mouChecks(ds);
+    if (mou === 'Tokyo MOU') { chk.items.unshift({ ok: ds.authorities.length >= 15, what: '讀到 ' + ds.authorities.length + ' 個主管機關（Table 2）' }); if (ds.statedRate !== undefined) chk.items.push({ ok: Math.abs(ds.statedRate - ds.total.detention_rate) <= 0.011, what: '表上全區留置率 ' + ds.statedRate + '%' }); }
+    if (ds.catPctOk === false) chk.items.push({ ok: false, what: '缺失類別百分比與數字不符' });
+    if (!year) chk.items.unshift({ ok: false, what: '讀不到年度' });
+    chk.ok = chk.items.every(function (c) { return c.ok; });
+    return { ds: ds, checks: chk.items, ok: chk.ok };
+  }
+  function loadMouData(store, user, p) {
+    need(user, 'editor');
+    var ids = [].concat(p.ids || p.id || MOU_DATA.map(function (d) { return d.id; })), out = [];
+    ids.forEach(function (id) {
+      var ds = MOU_DATA.filter(function (d) { return d.id === id; })[0]; if (!ds) throw new Error('沒有內建資料：' + id);
+      var r = importPortStats(store, user, { stats: mouStatsRows(ds), batch: 'S-' + id });
+      out.push({ id: id, mou: ds.mou, year: ds.year, added: r.added, updated: r.updated });
+    });
+    return { loaded: out };
+  }
+  function importMouAnnual(store, user, p) {
+    need(user, 'editor');
+    var ds = p.ds; if (!ds || !ds.mou || !ds.year) throw new Error('缺少年報資料');
+    var chk = mouChecks(ds); if (!chk.ok && !(p.force && user.role === 'admin')) throw new Error('核對未通過，不匯入：' + chk.items.filter(function (c) { return !c.ok; }).map(function (c) { return c.what; }).join('；'));
+    var id = (ds.mou === 'Paris MOU' ? 'PMOU-' : ds.mou === 'Tokyo MOU' ? 'TMOU-' : up(ds.mou).replace(/\W+/g, '') + '-') + ds.year;
+    var r = importPortStats(store, user, { stats: mouStatsRows(ds, { force: true }), batch: 'S-' + id + (p.auto ? '-AUTO' : '') });
+    return { id: id, added: r.added, updated: r.updated, checks: chk.items };
+  }
+  /** 各 MOU 已匯入的最新年度（全區列） */
+  function mouLatest(stats) { var m = {}; (stats || []).forEach(function (r) { if (up(r.country) === 'TOTAL' && !s(r.ship_type) && s(r.year) > (m[r.mou] || '')) m[r.mou] = s(r.year); }); return m; }
+  /** 某 MOU 最新（或指定年度）的全區參考：缺失類別、常見缺失、貨櫃船 */
+  function mouReference(stats, mou, year) {
+    var rows = (stats || []).filter(function (r) { return up(r.mou) === up(mou) && up(r.country) === 'TOTAL'; });
+    var y = s(year) || rows.filter(function (r) { return !s(r.ship_type); }).map(function (r) { return s(r.year); }).sort().pop(); if (!y) return null;
+    var tot = rows.filter(function (r) { return s(r.year) === y && !s(r.ship_type); })[0]; if (!tot) return null;
+    var pj = function (v) { try { return v ? JSON.parse(v) : null; } catch (e) { return null; } };
+    var bc = pj(tot.by_category), tp = pj(tot.top_items), cont = rows.filter(function (r) { return s(r.year) === y && up(r.ship_type) === 'CONTAINER'; })[0];
+    var cats = bc ? bc.cats.map(function (c) { return { name: c.name, zh: mouCatZh(c.name), code: c.code, n: c.n, pct: bc.total ? c.n / bc.total * 100 : 0 }; }).sort(function (a, b) { return b.n - a.n; }) : [];
+    var byCode = {}; cats.forEach(function (c) { var x = byCode[c.code] || (byCode[c.code] = { code: c.code, name: CATEGORIES[c.code] || '', n: 0, pct: 0, tip: CATEGORY_TIPS[c.code] || CATEGORY_TIPS['99'] }); x.n += c.n; x.pct += c.pct; });
+    return { mou: tot.mou, year: y, source: tot.source, ref: tot.ref, note: tot.note, inspections: +tot.inspections, deficiencies: +tot.deficiencies, detentions: +tot.detentions, rate: +tot.detention_rate, defPerInsp: +tot.inspections ? +tot.deficiencies / +tot.inspections : null,
+      cats: cats, catRef: bc ? bc.ref : '', groups: Object.keys(byCode).map(function (k) { return byCode[k]; }).sort(function (a, b) { return b.n - a.n; }),
+      top: tp ? tp.items.map(function (x) { return Object.assign({ zh: mouCatZh(x.name) }, x); }) : [], topLabel: tp ? tp.label : '',
+      container: cont ? { inspections: +cont.inspections, with_def: +cont.with_def || null, deficiencies: +cont.deficiencies || null, detentions: +cont.detentions, rate: +cont.detention_rate, defPerInsp: +cont.deficiencies && +cont.inspections ? +cont.deficiencies / +cont.inspections : null } : null };
+  }
+  /** 自動檢查：年報索引頁的 HTML → 最新年度與報告頁網址 */
+  function mouIndexLatest(mou, html) {
+    var h = String(html || ''), best = null, re = mou === 'Paris MOU' ? /href="([^"]*year-report-(20\d\d)[^"]*)"/gi : /href="([^"]*annual-report[^"]*?(20\d\d)\/?)"/gi, m;
+    while ((m = re.exec(h))) { if (mou !== 'Paris MOU' && !/annual-report-20\d\d|ann\d\d/i.test(m[1])) continue; var y = m[2]; if (/corrigendum/i.test(m[1])) continue; if (!best || y > best.year) best = { year: y, url: m[1] }; }
+    var pdfs = h.match(mou === 'Paris MOU' ? /https?:[^"'\s]+Annual[^"'\s]*Report[^"'\s]*\.pdf/gi : /https?:[^"'\s]+ANN\d\d[^"'\s]*\.pdf/gi) || [];
+    pdfs.forEach(function (u) { var y2 = mou === 'Paris MOU' ? (u.match(/(20\d\d)(?!.*20\d\d)/) || [])[1] : '20' + (u.match(/ANN(\d\d)/i) || [])[1]; if (y2 && (!best || y2 >= best.year)) best = { year: y2, url: best && best.year === y2 ? best.url : u, pdf: u }; });
+    return best;
+  }
+  function mouPdfFromPage(mou, html) { var m = String(html || '').match(mou === 'Paris MOU' ? /https?:[^"'\s]+(?:annual-report-20\d\d\/?|Annual[^"'\s]*Report[^"'\s]*\.pdf)/i : /https?:[^"'\s]+ANN\d\d[^"'\s]*\.pdf/i); return m ? m[0] : ''; }
+  /* ---------------- 比較趨勢：船對船、管理公司對管理公司（滾動 4 季） ---------------- */
+  /** 船型系列：Vessels.series 有填就用，否則依 TEU 歸類（6 個系列） */
+  function vesselSeries(v) {
+    if (s(v && v.series)) return s(v.series);
+    var t = Number(s(v && v.teu).replace(/,/g, '')); if (!t) return '';
+    return t >= 6000 ? '旗艦級 7,092 TEU' : t >= 4000 ? '中大型 4,331–4,957 TEU' : t >= 2900 ? '吉大港極限型 2,954 TEU' : t >= 2300 ? '區域主力型 2,535–2,741 TEU' : t >= 1700 && t < 1850 ? '曼谷極限型 1,756–1,808 TEU' : '支線型 987–1,909 TEU';
+  }
+  /** 船型區間（依 TEU）：預設 0–2,000、2,000–4,000、4,000–6,000、7,000 以上；落在兩個區間之間的船自成一組（例 6,000–7,000），不會被歸錯 */
+  function teuBands(spec) {
+    var out = []; String(spec || DEFAULT_SETTINGS.filter(function (d) { return d.key === 'teu_bands'; })[0].value).split(/[,，;；]/).forEach(function (x) { var m = s(x).replace(/,/g, '').match(/^(\d+)\s*[-~–]\s*(\d*)$/); if (m) out.push({ lo: Number(m[1]), hi: m[2] === '' ? Infinity : Number(m[2]) }); });
+    out.sort(function (a, b) { return a.lo - b.lo; });
+    return out.map(function (b) { b.label = teuLabel(b.lo, b.hi); return b; });
+  }
+  function teuLabel(lo, hi) { var f = function (n) { return Number(n).toLocaleString('en-US'); }; return hi === Infinity ? f(lo) + ' TEU 以上' : f(lo) + '–' + f(hi) + ' TEU'; }
+  function teuBand(v, spec) {
+    var t = Number(s(v && v.teu !== undefined ? v.teu : v).replace(/,/g, '')); if (!t) return '';
+    var bands = teuBands(spec), hit = bands.filter(function (b) { return t >= b.lo && t < b.hi; })[0]; if (hit) return hit.label;
+    var below = bands.filter(function (b) { return b.hi <= t; }).pop(), above = bands.filter(function (b) { return b.lo > t; })[0];
+    return teuLabel(below ? below.hi : 0, above ? above.lo : Infinity);
+  }
+  function ageBand(build, today) { if (!isoDate(build)) return ''; var a = daysBetween(isoDate(build), isoDate(today)) / 365.25; return a < 5 ? '0–5 年' : a < 10 ? '5–10 年' : a < 15 ? '10–15 年' : a < 20 ? '15–20 年' : '20 年以上'; }
+  function quarterList(from, to) { var out = [], y = +from.slice(0, 4), q = Math.floor((+from.slice(5, 7) - 1) / 3), ly = +to.slice(0, 4), lq = Math.floor((+to.slice(5, 7) - 1) / 3); while (y < ly || (y === ly && q <= lq)) { out.push({ label: y + '-Q' + (q + 1), d: y + '-' + String(q * 3 + 2).padStart(2, '0') + '-15' }); q++; if (q > 3) { q = 0; y++; } } return out; }
+  /** 一組檢查的滾動缺失比（每季，回看 win 季）：v = Σ(ISM×5＋其他) ÷ Σ檢查次數；沒有檢查的期間為 null */
+  function rollingPscSeries(insps, from, to, win) {
+    win = win || 4; var qs = quarterList(from, to), by = {};
+    (insps || []).forEach(function (i) { var d = isoDate(i.date); if (!d) return; var k = d.slice(0, 4) + '-Q' + (Math.floor((+d.slice(5, 7) - 1) / 3) + 1), o = by[k] || (by[k] = { n: 0, sc: 0, det: 0 }); o.n++; o.sc += inspScore(i); if (i.det === true || yes(i.detention)) o.det++; });
+    var all = quarterList(addMonths(from, -3 * (win - 1)), to);
+    return qs.map(function (q) { var idx = all.findIndex(function (x) { return x.label === q.label; }), n = 0, sc = 0, det = 0; for (var j = Math.max(0, idx - win + 1); j <= idx; j++) { var o = by[all[j].label]; if (o) { n += o.n; sc += o.sc; det += o.det; } } return { label: q.label, d: q.d, v: n ? sc / n : null, n: n, det: det }; });
+  }
+  /** 事故嚴重性滾動 4 季分數合計（近 12 個月分數） */
+  function rollingIncSeries(incs, cfg, from, to, win) {
+    win = win || 4; cfg = cfg || incRiskCfg(); var by = {};
+    (incs || []).forEach(function (x) { if (s(x.status) === STATUS.VOID) return; var d = isoDate(x.date); if (!d) return; var k = d.slice(0, 4) + '-Q' + (Math.floor((+d.slice(5, 7) - 1) / 3) + 1); by[k] = (by[k] || 0) + incidentScore(x, cfg); });
+    var all = quarterList(addMonths(from, -3 * (win - 1)), to);
+    return quarterList(from, to).map(function (q) { var idx = all.findIndex(function (x) { return x.label === q.label; }), v = 0; for (var j = Math.max(0, idx - win + 1); j <= idx; j++) v += by[all[j].label] || 0; return { label: q.label, d: q.d, v: Math.round(v * 100) / 100, n: 1 }; });
+  }
+  /* ---------------- 單船報告（船舶履歷）：期間內事故、PSC、訪船，加上 Tokyo MOU 窗口、風險評估與趨勢 ---------------- */
+  /** RightShip 紀錄（每次查詢 RightShip 平台後登錄一筆，保留歷史） */
+  function saveRightShip(store, user, p) {
+    need(user, 'editor');
+    var imo = s(p.imo); if (!/^\d{7}$/.test(imo)) throw new Error('請選擇船舶（IMO 7 碼）');
+    var asOf = isoDate(p.as_of) || isoDate(store.now()); var sc = s(p.safety_score), ghg = up(p.ghg_rating), doc = s(p.doc_subscore);
+    if (sc && !/^[1-5](\.\d)?$/.test(sc)) throw new Error('Safety Score 為 1–5');
+    if (ghg && !/^[A-G]$/.test(ghg)) throw new Error('GHG Rating 為 A–E（舊制 A–G）');
+    if (doc && !/^[1-5](\.\d+)?$/.test(doc)) throw new Error('DOC Subscore 為 1–5');
+    var row = { imo: imo, vessel: up(p.vessel), as_of: asOf, safety_score: sc, indicative: yes(p.indicative) ? 'Y' : '', doc_subscore: doc, ghg_rating: ghg,
+      source: s(p.source) || 'RightShip Platform', note: s(p.note), updated_by: user.email, updated_at: store.now() };
+    var hit = store.all('RightShip').some(function (r) { return s(r.imo) === imo && isoDate(r.as_of) === asOf; });
+    if (hit) store.updateWhere('RightShip', function (r) { return s(r.imo) === imo && isoDate(r.as_of) === asOf; }, row); else store.insert('RightShip', row);
+    audit(store, user, 'save_rightship', imo, asOf + ' Safety ' + (sc || '—') + ' GHG ' + (ghg || '—'));
+    return row;
+  }
+  /** 綜合風險：各項目給分（透明可查），合計 ≥ 8 高、≥ 5 偏高、≥ 2 一般 */
+  var DOSSIER_LEVELS = { H: { zh: '高風險', en: 'High' }, E: { zh: '偏高風險', en: 'Elevated' }, M: { zh: '一般', en: 'Moderate' }, L: { zh: '低風險', en: 'Low' } };
+  function dossierLevel(pts) { return pts >= 8 ? 'H' : pts >= 5 ? 'E' : pts >= 2 ? 'M' : 'L'; }
+  /**
+   * o: { key, from, to, today, settings, vessel(目前船舶列), formerNames,
+   *      inspections（此船，含 defs[]、det）, rawInspections（全部，供窗口計算）, vesselsRows, riskProfiles, nkStatus,
+   *      incidents（此船，原始列）, visits（此船，含 items[]）, rightship（此船紀錄） }
+   */
+  function shipDossier(o) {
+    var set = o.settings || {}, today = isoDate(o.today) || isoDate(new Date()), from = isoDate(o.from) || '0000-01-01', to = isoDate(o.to) || today;
+    var inR = function (d) { d = isoDate(d); return !!d && d >= from && d <= to; };
+    var ship = o.vessel || {}, imo = s(ship.imo), avg = tmouAvg(set), cfg = incRiskCfg(set);
+    var allIns = (o.inspections || []).slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+    var ins = allIns.filter(function (i) { return inR(i.date); });
+    var allInc = (o.incidents || []).filter(function (x) { return s(x.status) !== STATUS.VOID; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+    var incs = allInc.filter(function (x) { return inR(x.date); });
+    var vis = (o.visits || []).slice().sort(function (a, b) { return (a.date_from || a.report_date || '') < (b.date_from || b.report_date || '') ? 1 : -1; });
+    var visR = vis.filter(function (v) { return inR(v.date_from || v.report_date); });
+    var items = function (vs) { var a = []; vs.forEach(function (v) { (v.items || []).forEach(function (it) { a.push(Object.assign({ _v: v }, it)); }); }); return a.filter(function (it) { return s(it.status) !== VSTATUS.CANCELLED; }); };
+    var itR = items(visR), itAll = items(vis);
+    var openAll = itAll.filter(function (it) { var st = visitItemState(it, today); return st.status === VSTATUS.OPEN || st.status === VSTATUS.SUBMITTED; })
+      .map(function (it) { var st = visitItemState(it, today); return Object.assign(it, { overdue: st.overdue, daysLeft: st.daysLeft, state: st.status }); })
+      .sort(function (a, b) { return (a.due_date || '9') < (b.due_date || '9') ? -1 : 1; });
+    // PSC 統計（期間）
+    var defs = []; ins.forEach(function (i) { (i.defs || []).forEach(function (d) { defs.push(Object.assign({ _i: i }, d)); }); });
+    var ism = defs.filter(function (d) { return normCode(d.code).slice(0, 2) === '15'; }).length;
+    var nDef = ins.reduce(function (n, i) { return n + Math.max((i.defs || []).length, Number(i.def_count) || 0); }, 0);
+    var det = ins.filter(function (i) { return i.det === true || yes(i.detention); }).length;
+    var perfR = perfIndex(ins, avg);
+    var from36 = addMonths(today, -36), mem = listOf(set.tmou_members);
+    var perf36 = perfIndex(allIns.filter(function (i) { return i.date >= from36 && isTokyo(i, mem); }), avg);
+    // 重複缺失（期間內同一代碼 ≥ 2 次）
+    var byCode = {}; defs.forEach(function (d) { var c = normCode(d.code); if (!c) return; (byCode[c] = byCode[c] || []).push(d); });
+    var repeats = Object.keys(byCode).filter(function (c) { return byCode[c].length >= 2; }).map(function (c) { return { code: c, n: byCode[c].length, cat: CATEGORIES[c.slice(0, 2)] || '', dates: byCode[c].map(function (d) { return d._i.date; }), nature: byCode[c][0].nature }; }).sort(function (a, b) { return b.n - a.n; });
+    var byCat = {}; defs.forEach(function (d) { var c = normCode(d.code).slice(0, 2); if (c) byCat[c] = (byCat[c] || 0) + 1; });
+    // 事故
+    var risk = incidentRisk(allInc, cfg, today), scR = 0; incs.forEach(function (x) { scR += incidentScore(x, cfg); });
+    var tiers = { 1: 0, 2: 0, 3: 0 }; incs.forEach(function (x) { if (tiers[s(x.tier)] !== undefined) tiers[s(x.tier)]++; });
+    var incOpen = allInc.filter(function (x) { return s(x.status) === STATUS.OPEN; });
+    // 窗口與 SRP
+    var win = null;
+    if (imo && o.rawInspections) {
+      var wr = windowReport({ settings: set, vessels: o.vesselsRows || [ship], inspections: o.rawInspections, riskProfiles: o.riskProfiles || [], nkStatus: o.nkStatus || [] }, today);
+      win = wr.filter(function (r) { return s(r.imo) === imo; })[0] || null;
+    }
+    // 趨勢（全期資料，摘要期間）
+    var pPts = inspTrendPoints(allIns);
+    // 事故每季分數：沒有事故的季度記 0（從這艘船最早一筆紀錄的那季到今天）
+    var qMap = {}; quarterIncidentPoints(allInc, cfg).forEach(function (p) { qMap[p.label] = p; });
+    var first = [isoDate(ship.valid_from)].concat(allIns.map(function (i) { return isoDate(i.date); }), allInc.map(function (x) { return isoDate(x.date); }), vis.map(function (v) { return isoDate(v.date_from || v.report_date); })).filter(Boolean).sort()[0] || from;
+    var iPts = [], qy = +first.slice(0, 4), qq = Math.floor((+first.slice(5, 7) - 1) / 3), ly = +today.slice(0, 4), lq = Math.floor((+today.slice(5, 7) - 1) / 3);
+    while (qy < ly || (qy === ly && qq <= lq)) { var lab = qy + '-Q' + (qq + 1), mid = qy + '-' + String(qq * 3 + 2).padStart(2, '0') + '-15', hit = qMap[lab]; iPts.push({ d: mid > today ? today : mid, v: hit ? hit.v : 0, w: 1, n: hit ? hit.n : 0, label: lab }); qq++; if (qq > 3) { qq = 0; qy++; } }
+    var iAvg = iPts.length ? iPts.reduce(function (n, p) { return n + p.v; }, 0) / iPts.length : null;
+    var pTrend = trendSummary(pPts, from, to, avg.def, 0.25), iTrend = trendSummary(iPts, from, to, iAvg, 2);
+    // RightShip
+    var rs = (o.rightship || []).slice().sort(function (a, b) { return isoDate(a.as_of) < isoDate(b.as_of) ? 1 : -1; }), rsLast = rs[0] || null;
+    // 綜合風險評估
+    var F = [], add = function (k, zh, en, val, pts, note) { F.push({ key: k, zh: zh, en: en, value: val, points: pts, note: note || '' }); };
+    var IP = { H: 3, E: 2, M: 1, L: 0 }, PP = { 'VERY LOW': 3, LOW: 2, MEDIUM: 1, HIGH: 0 };
+    add('inc', '事故嚴重性（近 12 個月）', 'Incident severity (last 12 months)', risk.last12 + ' 分／pts・' + risk.level, IP[risk.level] || 0);
+    add('perf', 'PSC 績效（Tokyo MOU 算法，近 36 個月）', 'PSC performance (Tokyo MOU method, 36 months)', perf36.n ? perf36.performance + '・' + perf36.n + ' 次／insp.' : '—', perf36.n ? PP[perf36.performance] || 0 : 0, perf36.n ? '缺失比 ' + perf36.def_ratio.toFixed(2) + '／Tokyo MOU ' + avg.def : '36 個月內無 Tokyo MOU 檢查');
+    var srp = win ? (win.srp || win.srp_est) : '';
+    add('srp', 'Tokyo MOU 船舶風險等級（SRP）', 'Tokyo MOU Ship Risk Profile', srp ? srp + (win && !win.srp ? '（估算 est.）' : '') : '—', srp === 'HIGH' ? 2 : 0);
+    var wp = win ? win.priority : '';
+    add('win', 'Tokyo MOU 檢查窗口', 'Tokyo MOU inspection window', wp === 'I' ? 'Priority I' : wp === 'II' ? 'Priority II' : win && win.opening_soon ? '即將進入 opening soon' : '未進入 not due', wp === 'I' ? 2 : wp === 'II' ? 1 : 0);
+    var od = openAll.filter(function (it) { return it.overdue; }).length;
+    add('vf', '訪船缺失逾期未改善', 'Overdue visit findings', od + '／' + openAll.length + ' 未關閉 open', od >= 3 ? 2 : od ? 1 : 0);
+    var trOk = pTrend.n >= 3;
+    add('trend', 'PSC 缺失趨勢（期間）', 'PSC deficiency trend (period)', !pTrend.n ? '—' : (trOk ? ({ up: '上升 rising', down: '下降 falling', flat: '持平 flat' })[pTrend.dir] : '樣本不足 n<3') + (pTrend.vsBase !== null ? (pTrend.vsBase > 0 ? '・高於基準 above' : '・低於基準 below') : ''), trOk ? (pTrend.dir === 'up' && pTrend.vsBase > 0 ? 2 : pTrend.dir === 'up' || pTrend.vsBase > 0 ? 1 : 0) : (pTrend.n && pTrend.vsBase > 0 ? 1 : 0), trOk ? '' : '檢查次數少於 3 次，只比較平均與基準');
+    var rsv = rsLast ? Number(rsLast.safety_score) : null;
+    add('rs', 'RightShip Safety Score', 'RightShip Safety Score', rsLast && rsLast.safety_score ? rsLast.safety_score + (rsLast.indicative ? '（indicative）' : '') + '・' + isoDate(rsLast.as_of) : '尚未登錄 not recorded', rsv ? (rsv <= 2 ? 2 : rsv < 3.5 ? 1 : 0) : 0);
+    var total = F.reduce(function (n, f) { return n + f.points; }, 0), level = dossierLevel(total);
+    // 注意事項（中英）
+    var A = [], att = function (lv, zh, en) { A.push({ level: lv, zh: zh, en: en }); };
+    if (win) {
+      if (wp === 'I') att('high', 'Tokyo MOU 檢查窗口已過 ' + (-win.days_to_close) + ' 天（Priority I），在 Tokyo MOU 港口隨時可能被 PSC 登輪，請保持備檢狀態。', 'Tokyo MOU window closed ' + (-win.days_to_close) + ' days ago (Priority I). The vessel may be boarded at any Tokyo MOU port; keep her inspection-ready.');
+      else if (wp === 'II') att('high', '目前在 Tokyo MOU 檢查窗口內（Priority II），至 ' + win.to + ' 關閉，請做好 PSC 備檢。', 'The vessel is within the Tokyo MOU window (Priority II) until ' + win.to + '. Prepare for PSC inspection.');
+      else if (win.opening_soon) att('med', 'Tokyo MOU 檢查窗口將於 ' + win.from + ' 開啟（' + win.days_to_open + ' 天後），請提前完成自我檢查。', 'Tokyo MOU window opens on ' + win.from + ' (in ' + win.days_to_open + ' days). Complete a self-assessment beforehand.');
+      (win.nk_alerts || []).forEach(function (t) { att('med', '船級：' + t, 'Class: ' + t); });
+    }
+    if (perf36.n && (perf36.performance === 'LOW' || perf36.performance === 'VERY LOW')) att('high', 'PSC 績效為 ' + perf36.performance + '（缺失比 ' + perf36.def_ratio.toFixed(2) + '，Tokyo MOU 平均 ' + avg.def + '），為 Tokyo MOU 高風險因子。', 'PSC performance is ' + perf36.performance + ' (deficiency index ' + perf36.def_ratio.toFixed(2) + ' vs Tokyo MOU average ' + avg.def + '), a high-risk factor under Tokyo MOU.');
+    if (det) att('high', '期間內有 ' + det + ' 次 PSC 留置，請確認根本原因分析與矯正措施已完成並有效。', det + ' PSC detention(s) in the period. Ensure root-cause analysis and corrective actions are completed and effective.');
+    repeats.slice(0, 5).forEach(function (r) { att('med', '重複缺失 ' + r.code + (r.cat ? '（' + r.cat + '）' : '') + ' 出現 ' + r.n + ' 次：' + s(r.nature).slice(0, 80), 'Repeated deficiency ' + r.code + ' found ' + r.n + ' times: ' + s(r.nature).slice(0, 80)); });
+    if (trOk && pTrend.dir === 'up') att(pTrend.vsBase > 0 ? 'high' : 'med', 'PSC 缺失比呈上升趨勢（每年 +' + pTrend.slope.toFixed(2) + '）' + (pTrend.vsBase > 0 ? '，且平均高於 Tokyo MOU 基準' : '') + '。', 'PSC deficiency index is rising (+' + pTrend.slope.toFixed(2) + ' per year)' + (pTrend.vsBase > 0 ? ' and above the Tokyo MOU baseline' : '') + '.');
+    if (risk.level === 'H' || risk.level === 'E') att('high', '近 12 個月事故嚴重性 ' + risk.last12 + ' 分（' + DOSSIER_LEVELS[risk.level === 'H' ? 'H' : 'E'].zh + '），請檢討共通原因。', 'Incident severity in the last 12 months is ' + risk.last12 + ' points (' + DOSSIER_LEVELS[risk.level === 'H' ? 'H' : 'E'].en + '). Review common causes.');
+    var cut = function (t, n) { t = s(t).replace(/\s+/g, ' '); return t.length > n ? t.slice(0, n) + '…' : t; };
+    incOpen.forEach(function (x) { att('med', '事故 ' + x.tracking_no + ' 尚未結案' + (x.rca_due && isoDate(x.rca_due) < today ? '，RCA 已逾期' : '') + '：' + cut(x.summary, 70), 'Incident ' + x.tracking_no + ' is still open' + (x.rca_due && isoDate(x.rca_due) < today ? ', RCA overdue' : '') + ': ' + cut(x.summary, 70)); });
+    if (od) att('high', '訪船缺失有 ' + od + ' 項逾期未改善，請船管儘速提交矯正報告與佐證。', od + ' visit finding(s) are overdue. The manager is requested to submit corrective action reports with evidence promptly.');
+    else if (openAll.length) att('med', '訪船缺失尚有 ' + openAll.length + ' 項未關閉，請依期限完成。', openAll.length + ' visit finding(s) remain open. Please close them within the due dates.');
+    if (rsLast && rsv && rsv <= 2) att('high', 'RightShip Safety Score ' + rsLast.safety_score + '，可能影響租船與港口接受度。', 'RightShip Safety Score is ' + rsLast.safety_score + ', which may affect charterer and terminal acceptance.');
+    if (rsLast && daysBetween(isoDate(rsLast.as_of), today) > 180) att('info', 'RightShip 資料已超過 6 個月（' + isoDate(rsLast.as_of) + '），請更新。', 'RightShip data is older than 6 months (' + isoDate(rsLast.as_of) + '); please update.');
+    var lastVisit = vis.filter(function (v) { return s(v.party) === 'MGR'; })[0], lastOwn = vis.filter(function (v) { return s(v.party) === 'OWN'; })[0];
+    if (!lastVisit || daysBetween(isoDate(lastVisit.date_from || lastVisit.report_date), today) > 183) att('info', '管理公司超過 6 個月沒有登輪紀錄' + (lastVisit ? '（上次 ' + isoDate(lastVisit.date_from || lastVisit.report_date) + '）' : '') + '。', 'No manager visit recorded in the last 6 months' + (lastVisit ? ' (last ' + isoDate(lastVisit.date_from || lastVisit.report_date) + ')' : '') + '.');
+    var rank = { high: 0, med: 1, info: 2 }; A.sort(function (a, b) { return rank[a.level] - rank[b.level]; });
+    return {
+      ship: { vessel: ship.vessel, imo: imo, chinese: ship.chinese || '', company: ship.company || '', management: ship.management || '', manager: ship.manager || '', pic: ship.pic || '', flag: ship.flag || '', class_society: ship.class_society || '',
+        date_of_build: ship.date_of_build || '', deadweight: ship.deadweight || '', gross_tonnage: ship.gross_tonnage || '', teu: ship.teu || '', former: o.formerNames || [] },
+      period: { from: from === '0000-01-01' ? (allIns.concat(allInc).map(function (x) { return x.date; }).concat(vis.map(function (v) { return v.date_from; })).filter(Boolean).sort()[0] || to) : from, to: to, today: today },
+      kpi: { incidents: incs.length, tiers: tiers, incScore: Math.round(scR * 100) / 100, incOpen: incOpen.length, psc: ins.length, nil: ins.filter(function (i) { return !Math.max((i.defs || []).length, Number(i.def_count) || 0); }).length,
+        defs: nDef, ism: ism, det: det, defRatio: perfR.def_ratio, visits: visR.length, vfTotal: itR.length, vfClosed: itR.filter(function (it) { return s(it.status) === VSTATUS.CLOSED; }).length, vfOpenAll: openAll.length, vfOverdue: od },
+      incidents: incs, inspections: ins, defsByCat: byCat, repeats: repeats, visits: visR, openItems: openAll,
+      psc: { periodPerf: perfR, perf36: perf36, avg: avg }, incRisk: risk, window: win, rightship: rs, trends: { psc: pTrend, inc: iTrend, pscPoints: pPts, incPoints: iPts, incAvg: iAvg },
+      assessment: { factors: F, total: total, level: level, label: DOSSIER_LEVELS[level] }, attention: A,
+      lastVisit: { mgr: lastVisit ? isoDate(lastVisit.date_from || lastVisit.report_date) : '', own: lastOwn ? isoDate(lastOwn.date_from || lastOwn.report_date) : '' }
+    };
+  }
   function bootstrap(store, user) {
     var out = {
       version: VERSION, user: user, settings: settingsMap(store),
@@ -1870,6 +2450,8 @@ var PSC = (function () {
     var tplRows = []; try { tplRows = store.all('Templates'); } catch (e) { tplRows = []; }
     out.templates = templatesOf(tplRows);
     try { out.visits = store.all('Visits'); out.visitItems = store.all('VisitItems'); } catch (e) { out.visits = []; out.visitItems = []; }
+    try { out.rightship = store.all('RightShip'); } catch (e) { out.rightship = []; }
+    try { out.portPsc = store.all('PortPSC'); out.portStats = store.all('PortStats'); } catch (e) { out.portPsc = []; out.portStats = []; }
     if (!out.rules.length) out.rules = DEFAULT_RULES.map(function (r) { return Object.assign({}, r); });
     if (!out.mouMap.length) out.mouMap = DEFAULT_MOU.map(function (r) { return Object.assign({}, r); });
     out.canBribe = canBribe(user, out.settings);
@@ -1914,6 +2496,12 @@ var PSC = (function () {
       case 'saveVisit': return store.lock(function () { return saveVisit(store, user, payload); });
       case 'importVisitItems': return store.lock(function () { return importVisitItems(store, user, payload); });
       case 'saveVisitItem': return store.lock(function () { return saveVisitItem(store, user, payload); });
+      case 'importPortPsc': return store.lock(function () { return importPortPsc(store, user, payload); });
+      case 'importPortStats': return store.lock(function () { return importPortStats(store, user, payload); });
+      case 'loadMouData': return store.lock(function () { return loadMouData(store, user, payload); });
+      case 'importMouAnnual': return store.lock(function () { return importMouAnnual(store, user, payload); });
+      case 'deletePortBatch': return store.lock(function () { return deletePortBatch(store, user, payload); });
+      case 'saveRightShip': return store.lock(function () { return saveRightShip(store, user, payload); });
       case 'visitItemAction': return store.lock(function () { return visitItemAction(store, user, payload); });
       case 'saveTemplate': return adminSave(store, user, 'Templates', 'code', payload);
       case 'saveCompany': return adminSave(store, user, 'Companies', 'code', payload);
@@ -1935,7 +2523,7 @@ var PSC = (function () {
     deadlines: deadlines, pscTier: pscTier, vesselAt: vesselAt, handle: handle,
     BRIBE_FIELDS: BRIBE_FIELDS, parseBribe: parseBribe, bribeFlag: bribeFlag, canBribe: canBribe, num: num,
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
-    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
+    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
     TOKYO: TOKYO, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
     incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
     DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,
