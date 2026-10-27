@@ -1,0 +1,5 @@
+# Vercel 只部署網站需要的檔案；其他（說明文件、Apps Script、測試、工具）留在 GitHub，不放到網站上
+/*
+!index.html
+!config.js
+!assets
