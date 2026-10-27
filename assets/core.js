@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.14.0';
+  var VERSION = '1.16.0';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -53,11 +53,18 @@ var PSC = (function () {
   var TOKYO = 'Tokyo MOU';
   var MOU_NAMES = ['Tokyo MOU', 'Paris MOU', 'Indian Ocean MOU', 'Abuja MOU', 'Riyadh MOU', 'Mediterranean MOU', 'Black Sea MOU',
     'Viña del Mar', 'Caribbean MOU', 'USCG', 'Taiwan MPB'];
+  /** 台灣港口國檢查（交通部航港局 MPB）：台灣不是任何 MOU 的成員，檢查列入統計與各船紀錄，但不計入 Tokyo MOU 窗口、SRP、36 個月績效 */
+  var TAIWAN_PSC = 'Taiwan MPB';
+  var TW_PORTS = [['KEELUNG', '基隆港', 25.15, 121.74], ['TAIPEI', '臺北港', 25.155, 121.37], ['TAICHUNG', '臺中港', 24.29, 120.51], ['KAOHSIUNG', '高雄港', 22.61, 120.28],
+    ['ANPING', '安平港', 22.98, 120.16], ['HUALIEN', '花蓮港', 23.98, 121.63], ['SUAO', '蘇澳港', 24.59, 121.87], ['BUDAI', '布袋港', 23.38, 120.14], ['MAILIAO', '麥寮港', 23.79, 120.18], ['HEPING', '和平港', 24.30, 121.76]];
+  var TW_PORT_ZH = {}; TW_PORTS.forEach(function (r) { TW_PORT_ZH[r[1]] = r[0]; TW_PORT_ZH[r[1].replace('港', '')] = r[0]; TW_PORT_ZH[r[1].replace('臺', '台')] = r[0]; TW_PORT_ZH[r[1].replace('臺', '台').replace('港', '')] = r[0]; });
+  /** 港口名稱：中文台灣港名轉成英文（基隆、台中港 → KEELUNG、TAICHUNG），其他照原樣大寫 */
+  function twPort(port) { var p = String(port === undefined || port === null ? '' : port).trim(); return TW_PORT_ZH[p] || p.toUpperCase(); }
   /** 國名別名 → 系統用名（港口國欄位一律用系統用名） */
   var COUNTRY_ALIAS = { 'UNITED ARAB EMIRATES': 'UAE', 'U.A.E.': 'UAE', 'KOREA': 'SOUTH KOREA', 'REPUBLIC OF KOREA': 'SOUTH KOREA', 'KOREA, REPUBLIC OF': 'SOUTH KOREA',
     'VIET NAM': 'VIETNAM', 'UNITED STATES': 'USA', 'UNITED STATES OF AMERICA': 'USA', 'U.S.A.': 'USA', 'US': 'USA', 'IVORY COAST': "COTE D'IVOIRE",
     "CÔTE D'IVOIRE": "COTE D'IVOIRE", 'P.R. CHINA': 'CHINA', "PEOPLE'S REPUBLIC OF CHINA": 'CHINA', 'PRC': 'CHINA', 'RUSSIAN FEDERATION': 'RUSSIA',
-    'HONG KONG, CHINA': 'HONG KONG', 'HONGKONG': 'HONG KONG', 'KSA': 'SAUDI ARABIA', 'UK': 'UNITED KINGDOM', 'TAIWAN, CHINA': 'TAIWAN', 'R.O.C.': 'TAIWAN' };
+    'HONG KONG, CHINA': 'HONG KONG', 'HONGKONG': 'HONG KONG', 'KSA': 'SAUDI ARABIA', 'UK': 'UNITED KINGDOM', 'TAIWAN, CHINA': 'TAIWAN', 'R.O.C.': 'TAIWAN', 'ROC': 'TAIWAN', 'REPUBLIC OF CHINA': 'TAIWAN', 'CHINESE TAIPEI': 'TAIWAN', '台灣': 'TAIWAN', '臺灣': 'TAIWAN', '中華民國': 'TAIWAN' };
   function normCountry(c) { var k = up(c).replace(/’/g, "'"); return COUNTRY_ALIAS[k] || k; }
   /**
    * 港口國 → 檢查體系預設對照（寫入 MOUMap 分頁，組員可增修）。
@@ -102,11 +109,13 @@ var PSC = (function () {
   /** 依對照表判定一次檢查屬於哪個 MOU：先找「國家＋港口」，再找國家 */
   function resolveMOU(map, country, port) {
     var c = normCountry(country), p = up(port), rows = (map && map.length ? map : DEFAULT_MOU).filter(function (r) { return normCountry(r.country) === c; });
+    if (c === 'TAIWAN') return { mou: TAIWAN_PSC, also: '', note: '台灣不屬於任何 MOU，由交通部航港局執行；不計入 Tokyo MOU', found: true };
     var hit = rows.filter(function (r) { return s(r.port) && (p === up(r.port) || p.indexOf(up(r.port)) >= 0); })[0] || rows.filter(function (r) { return !s(r.port); })[0];
     return hit ? { mou: s(hit.mou), also: s(hit.also), note: s(hit.note), found: true } : { mou: '', also: '', note: '', found: false };
   }
   /** 這次檢查會不會重算 Tokyo MOU 窗口：看 MOU 欄；MOU 欄空白才退回用成員國清單 */
   function isTokyo(insp, members) {
+    if (normCountry(insp.country) === 'TAIWAN' || s(insp.mou) === TAIWAN_PSC) return false;  // 台灣不是 Tokyo MOU 成員，MOU 欄填錯也不算
     var m = s(insp.mou);
     if (m && m !== 'V') return up(m) === up(TOKYO);
     return (members || []).indexOf(normCountry(insp.country)) >= 0;
@@ -192,7 +201,7 @@ var PSC = (function () {
     var untracked = (s(inc.source) === 'REGISTER' || s(inc.created_by) === 'import') && !STAGES.some(function (st) { return isoDate(inc[st.k + '_at']); }) && !(docs || []).some(function (d) { return STAGES.some(function (st) { return d.doc_type === st.doc; }); });
     return STAGES.map(function (st) {
       var due = s(inc[st.k + '_due']), at = isoDate(inc[st.k + '_at']), src = at ? '填報' : '';
-      if (!at) { var ds = (docs || []).filter(function (d) { return d.doc_type === st.doc; }).map(function (d) { return isoDate(d.uploaded_at); }).filter(Boolean).sort(); if (ds.length) { at = ds[0]; src = '文件'; } }
+      if (!at) { var ds = (docs || []).filter(function (d) { return d.doc_type === st.doc; }).map(function (d) { return isoDate(d.uploaded_at); }).filter(Boolean).sort(); if (ds.length) { at = ds[0]; src = (docs || []).some(function (d) { return d.doc_type === st.doc && d.via === 'update' && isoDate(d.uploaded_at) === at; }) ? '更新紀錄' : '文件'; } }
       var state = at ? (due && at > due ? 'late' : 'ontime') : (due && t > due ? 'overdue' : 'pending');
       if (fm && state !== 'ontime') state = 'exempt';
       if (untracked && state !== 'ontime') state = 'untracked';
@@ -249,7 +258,8 @@ var PSC = (function () {
     ['SHENZHEN', 'CHINA', 22.57, 114.27], ['SI RACHA', 'THAILAND', 13.17, 100.92], ['SUBIC', 'PHILIPPINES', 14.81, 120.28], ['SURABAYA', 'INDONESIA', -7.20, 112.73],
     ['SYDNEY', 'AUSTRALIA', -33.97, 151.22], ['TIANJIN', 'CHINA', 38.97, 117.79], ['TOKYO', 'JAPAN', 35.62, 139.79], ['XIAMEN', 'CHINA', 24.48, 118.07],
     ['YOKOHAMA', 'JAPAN', 35.45, 139.66], ['SINGAPORE', 'SINGAPORE', 1.26, 103.84], ['KAOHSIUNG', 'TAIWAN', 22.61, 120.28], ['TAICHUNG', 'TAIWAN', 24.29, 120.51],
-    ['COLOMBO', 'SRI LANKA', 6.95, 79.84], ['NHAVA SHEVA', 'INDIA', 18.95, 72.95], ['KARACHI', 'PAKISTAN', 24.84, 66.98], ['CHITTAGONG', 'BANGLADESH', 22.31, 91.80]
+    ['COLOMBO', 'SRI LANKA', 6.95, 79.84], ['NHAVA SHEVA', 'INDIA', 18.95, 72.95], ['KARACHI', 'PAKISTAN', 24.84, 66.98], ['CHITTAGONG', 'BANGLADESH', 22.31, 91.80],
+    ['TAIPEI', 'TAIWAN', 25.155, 121.37], ['ANPING', 'TAIWAN', 22.98, 120.16], ['HUALIEN', 'TAIWAN', 23.98, 121.63], ['SUAO', 'TAIWAN', 24.59, 121.87], ['BUDAI', 'TAIWAN', 23.38, 120.14], ['MAILIAO', 'TAIWAN', 23.79, 120.18], ['HEPING', 'TAIWAN', 24.3, 121.76]
   ].map(function (r) { return { port: r[0], country: r[1], lat: String(r[2]), lng: String(r[3]), note: '' }; });
   /** 港口座標：Ports 分頁優先，沒有的用預設值 */
   function portTable(rows) {
@@ -268,7 +278,8 @@ var PSC = (function () {
     Deficiencies: ['def_id', 'insp_id', 'tracking_no', 'seq', 'code', 'category', 'nature', 'action', 'deadline',
       'rectified', 'rectified_date', 'corrective_action', 'remarks', 'updated_by', 'updated_at'],
     Documents: ['doc_id', 'insp_id', 'tracking_no', 'doc_type', 'seq', 'file_name', 'original_name', 'mime', 'size',
-      'file_id', 'url', 'note', 'uploaded_by', 'uploaded_at'],
+      'file_id', 'url', 'note', 'uploaded_by', 'uploaded_at', 'status', 'deleted_by', 'deleted_at', 'delete_reason', 'history', 'updated_by', 'updated_at'],
+    IncidentUpdates: ['upd_id', 'tracking_no', 'received_at', 'stage', 'source', 'channel', 'content', 'entered_by', 'entered_at', 'status', 'history', 'updated_by', 'updated_at'],
     Incidents: ['tracking_no', 'tracking_no_std', 'date', 'company', 'vessel', 'imo', 'tier', 'type', 'priority', 'unit',
       'status', 'pic', 'summary', 'closed_date', 'source', 'insp_id', 'check_notes', 'flash_due', 'initial_due', 'rca_due',
       'corrective_action', 'created_by', 'created_at', 'updated_by', 'updated_at',
@@ -532,9 +543,10 @@ var PSC = (function () {
       insp_id: '', tracking_no: '', created_by: user.email, created_at: now, status: ''
     };
     var vname = up(v.vessel);
-    rec.date = date; rec.port = up(inp.port); rec.country = normCountry(inp.country);
+    rec.date = date; rec.port = twPort(inp.port); rec.country = normCountry(inp.country) || (TW_PORTS.some(function (r) { return r[0] === rec.port; }) ? 'TAIWAN' : '');
     var mouHit = resolveMOU(store.all('MOUMap'), rec.country, rec.port);
     rec.mou = s(inp.mou) && s(inp.mou) !== 'V' ? s(inp.mou) : mouHit.mou;
+    if (normCountry(rec.country) === 'TAIWAN') rec.mou = TAIWAN_PSC;  // 台灣港口一律為航港局檢查，不列入 Tokyo MOU
     rec.vessel = vname; rec.imo = s(v.imo); rec.company = up(v.company); rec.management = s(v.management) || COMPANY_TO_MGMT[up(v.company)] || '';
     rec.nil = nil ? 'Y' : 'N'; rec.detention = yes(inp.detention) ? 'Y' : 'N'; rec.def_count = String(defsIn.length);
     rec.pic = s(inp.pic) || s(v.pic); rec.remarks = s(inp.remarks);
@@ -657,6 +669,102 @@ var PSC = (function () {
     store.insert('Documents', row);
     audit(store, user, 'upload_document', docId, { file: fileName, original: p.original_name });
     return row;
+  }
+
+  /* ---------------- 文件修改與刪除（每次都留紀錄）、事故更新紀錄 ---------------- */
+  var DOC_DELETED = '已刪除';
+  function stampLine(store, user, what, reason) { return visitStamp(store) + '｜' + (s(user.name) || user.email) + '｜' + what + (s(reason) ? '｜原因：' + s(reason) : ''); }
+  function addHistory(old, line) { return (s(old) ? s(old) + '\n' : '') + line; }
+  function findDoc(store, id) { var d = store.all('Documents').filter(function (x) { return s(x.doc_id) === s(id); })[0]; if (!d) throw new Error('找不到文件 ' + id); return d; }
+  /** 修改文件的類別或說明；原因必填，寫入文件的 history 與 AuditLog。檔名與 Drive 檔案不變 */
+  function updateDocument(store, user, p) {
+    need(user, 'editor');
+    var d = findDoc(store, p.doc_id), reason = s(p.reason), patch = {}, what = [];
+    if (s(d.status) === DOC_DELETED) throw new Error('文件已刪除，請先由 admin 還原');
+    if (!reason) throw new Error('請填寫修改原因');
+    if (p.doc_type !== undefined && s(p.doc_type) && s(p.doc_type) !== s(d.doc_type)) {
+      if (!DOC_TYPES.some(function (t) { return t.code === s(p.doc_type); })) throw new Error('文件類別不正確：' + p.doc_type);
+      what.push('類別 ' + d.doc_type + ' → ' + s(p.doc_type)); patch.doc_type = s(p.doc_type);
+    }
+    if (p.note !== undefined && s(p.note) !== s(d.note)) { what.push('說明「' + (s(d.note) || '（空白）') + '」→「' + (s(p.note) || '（空白）') + '」'); patch.note = s(p.note); }
+    if (!what.length) throw new Error('沒有變更');
+    patch.history = addHistory(d.history, stampLine(store, user, '修改：' + what.join('；'), reason));
+    patch.updated_by = user.email; patch.updated_at = store.now();
+    store.update('Documents', 'doc_id', d.doc_id, patch);
+    audit(store, user, 'update_document', d.doc_id, what.join('；') + '｜原因：' + reason);
+    return Object.assign({}, d, patch);
+  }
+  /** 刪除文件：不真的刪掉，標為已刪除並把 Drive 檔移到「已刪除文件」資料夾；原因必填 */
+  function deleteDocument(store, user, p) {
+    need(user, 'editor');
+    var d = findDoc(store, p.doc_id), reason = s(p.reason);
+    if (!reason) throw new Error('請填寫刪除原因');
+    if (s(d.status) === DOC_DELETED) throw new Error('文件已刪除');
+    var moved = '';
+    if (s(d.file_id) && typeof store.moveToDeleted === 'function') { try { store.moveToDeleted(d.file_id); moved = '；Drive 檔已移到「已刪除文件」'; } catch (e) { moved = '；Drive 檔移動失敗：' + (e && e.message || e); } }
+    var patch = { status: DOC_DELETED, deleted_by: user.email, deleted_at: store.now(), delete_reason: reason, history: addHistory(d.history, stampLine(store, user, '刪除' + moved, reason)), updated_by: user.email, updated_at: store.now() };
+    store.update('Documents', 'doc_id', d.doc_id, patch);
+    audit(store, user, 'delete_document', d.doc_id, d.file_name + '｜原因：' + reason + moved);
+    return Object.assign({}, d, patch);
+  }
+  function restoreDocument(store, user, p) {
+    need(user, 'admin');
+    var d = findDoc(store, p.doc_id), reason = s(p.reason);
+    if (s(d.status) !== DOC_DELETED) throw new Error('文件沒有被刪除');
+    if (!reason) throw new Error('請填寫還原原因');
+    var patch = { status: '', history: addHistory(d.history, stampLine(store, user, '還原', reason)), updated_by: user.email, updated_at: store.now() };
+    store.update('Documents', 'doc_id', d.doc_id, patch);
+    audit(store, user, 'restore_document', d.doc_id, '原因：' + reason);
+    return Object.assign({}, d, patch);
+  }
+  /** 事故更新紀錄：海技人員直接登錄管理公司的通報內容（不必上傳檔案）。階段會計入通報時限，等同上傳該階段的文件 */
+  var UPD_STAGES = [
+    { k: 'flash', doc: 'FLASH', name: '立即通報' }, { k: 'initial', doc: 'INIT', name: '初步報告' }, { k: 'progress', doc: 'UPD', name: '進度更新' },
+    { k: 'rca', doc: 'RCA', name: '最終調查報告 RCA' }, { k: 'close', doc: 'CLOSE', name: '結案確認' }, { k: 'other', doc: '', name: '其他資訊' }];
+  var UPD_CHANNELS = ['Email', '電話', 'WhatsApp／LINE', '視訊會議', '當面', '其他'];
+  function utcMinute(v) { var t = s(v).replace(' ', 'T'); if (!t) return ''; if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t + ' 00:00'; var d = new Date(/Z|[+-]\d{2}:?\d{2}$/.test(t) ? t : t + 'Z'); return isNaN(d) ? '' : d.toISOString().slice(0, 16).replace('T', ' '); }
+  function saveIncidentUpdate(store, user, p) {
+    need(user, 'editor');
+    var no = s(p.tracking_no), inc = store.all('Incidents').filter(function (x) { return s(x.tracking_no) === no; })[0];
+    if (!inc) throw new Error('找不到事故 ' + no);
+    var st = UPD_STAGES.filter(function (x) { return x.k === s(p.stage); })[0]; if (!st) throw new Error('請選擇更新階段');
+    var at = utcMinute(p.received_at); if (!at) throw new Error('請填收到資訊的時間（UTC）');
+    if (!s(p.content)) throw new Error('請填寫更新內容');
+    var row = { tracking_no: no, received_at: at, stage: st.k, source: s(p.source), channel: s(p.channel), content: s(p.content) };
+    if (s(p.upd_id)) {
+      var old = store.all('IncidentUpdates').filter(function (x) { return s(x.upd_id) === s(p.upd_id); })[0]; if (!old) throw new Error('找不到更新紀錄 ' + p.upd_id);
+      if (s(old.status) === DOC_DELETED) throw new Error('這筆更新已刪除');
+      if (!s(p.reason)) throw new Error('請填寫修改原因');
+      var what = ['received_at', 'stage', 'source', 'channel', 'content'].filter(function (f) { return s(old[f]) !== s(row[f]); }).map(function (f) { return ({ received_at: '時間', stage: '階段', source: '來源', channel: '管道', content: '內容' })[f] + (f === 'content' ? '' : ' ' + (s(old[f]) || '—') + ' → ' + (s(row[f]) || '—')); });
+      if (!what.length) throw new Error('沒有變更');
+      Object.assign(row, { history: addHistory(old.history, stampLine(store, user, '修改：' + what.join('；') + (row.content !== s(old.content) ? '（原內容：' + s(old.content).slice(0, 200) + '）' : ''), p.reason)), updated_by: user.email, updated_at: store.now() });
+      store.update('IncidentUpdates', 'upd_id', old.upd_id, row);
+      audit(store, user, 'update_incident_update', old.upd_id, what.join('；') + '｜原因：' + s(p.reason));
+      return Object.assign({}, old, row);
+    }
+    var n = store.all('IncidentUpdates').filter(function (x) { return s(x.tracking_no) === no; }).length + 1;
+    var id = no + '-U' + pad2(n);
+    Object.assign(row, { upd_id: id, entered_by: user.email, entered_at: store.now(), status: '', history: stampLine(store, user, '新增（' + st.name + '）', ''), updated_by: '', updated_at: '' });
+    var full = {}; SCHEMA.IncidentUpdates.forEach(function (c) { full[c] = row[c] === undefined ? '' : row[c]; });
+    store.insert('IncidentUpdates', full);
+    audit(store, user, 'add_incident_update', id, st.name + '｜' + at + ' UTC｜' + s(p.source));
+    return full;
+  }
+  function deleteIncidentUpdate(store, user, p) {
+    need(user, 'editor');
+    var old = store.all('IncidentUpdates').filter(function (x) { return s(x.upd_id) === s(p.upd_id); })[0]; if (!old) throw new Error('找不到更新紀錄 ' + p.upd_id);
+    if (!s(p.reason)) throw new Error('請填寫刪除原因');
+    if (s(old.status) === DOC_DELETED) throw new Error('這筆更新已刪除');
+    var patch = { status: DOC_DELETED, history: addHistory(old.history, stampLine(store, user, '刪除', p.reason)), updated_by: user.email, updated_at: store.now() };
+    store.update('IncidentUpdates', 'upd_id', old.upd_id, patch);
+    audit(store, user, 'delete_incident_update', old.upd_id, '原因：' + s(p.reason));
+    return Object.assign({}, old, patch);
+  }
+  /** 通報時限判定用的「證據」：未刪除的文件＋未刪除的更新紀錄（更新紀錄視同該階段的文件，以收到時間計） */
+  function evidenceDocs(docs, updates) {
+    var out = (docs || []).filter(function (d) { return s(d.status) !== DOC_DELETED; });
+    (updates || []).forEach(function (u) { if (s(u.status) === DOC_DELETED) return; var st = UPD_STAGES.filter(function (x) { return x.k === s(u.stage); })[0]; if (st && st.doc) out.push({ doc_type: st.doc, uploaded_at: s(u.received_at).replace(' ', 'T') + ':00Z', upd_id: u.upd_id, via: 'update' }); });
+    return out;
   }
 
   function setCaseStatus(store, user, p) {
@@ -847,7 +955,9 @@ var PSC = (function () {
   function applyMOU(store, user, p) {
     need(user, 'admin');
     var map = store.all('MOUMap'), groups = {}, missing = {};
+    var only = p && s(p.country) ? normCountry(p.country) : '';
     store.all('Inspections').forEach(function (r) {
+      if (only && normCountry(r.country) !== only) return;
       var hit = resolveMOU(map, r.country, r.port);
       if (!hit.found) { missing[normCountry(r.country) || '(空白)'] = 1; return; }
       var cur = s(r.mou);
@@ -1718,6 +1828,7 @@ var PSC = (function () {
       if (!s(r.mou) || s(r.mou) === 'V') add('提醒', 'Inspections', k, 'MOU 未標示（對照表為 ' + hit.mou + '）');
       else if (s(r.mou) !== hit.mou && (hit.also || '').indexOf(s(r.mou)) < 0) add('提醒', 'Inspections', k, 'MOU 填「' + r.mou + '」，對照表 ' + r.country + ' 為 ' + hit.mou);
       if (MOU_NAMES.indexOf(s(r.mou)) < 0 && s(r.mou) && s(r.mou) !== 'V') add('提醒', 'Inspections', k, 'MOU 名稱不在標準清單：' + r.mou);
+      if (normCountry(r.country) === 'TAIWAN' && s(r.mou) !== TAIWAN_PSC) add('錯誤', 'Inspections', k, '台灣港口檢查的 MOU 應為 Taiwan MPB（目前「' + (s(r.mou) || '空白') + '」）；台灣不是 Tokyo MOU 成員。系統管理 →「修正台灣檢查的 MOU」');
     });
     Object.keys(noMap).forEach(function (c) { add('提醒', 'MOUMap', c, 'MOU 對照表沒有這個港口國（' + noMap[c] + ' 次檢查）'); });
     var pt = portTable(db.ports), noPort = {};
@@ -2451,6 +2562,7 @@ var PSC = (function () {
     out.templates = templatesOf(tplRows);
     try { out.visits = store.all('Visits'); out.visitItems = store.all('VisitItems'); } catch (e) { out.visits = []; out.visitItems = []; }
     try { out.rightship = store.all('RightShip'); } catch (e) { out.rightship = []; }
+    try { out.incidentUpdates = store.all('IncidentUpdates'); } catch (e) { out.incidentUpdates = []; }
     try { out.portPsc = store.all('PortPSC'); out.portStats = store.all('PortStats'); } catch (e) { out.portPsc = []; out.portStats = []; }
     if (!out.rules.length) out.rules = DEFAULT_RULES.map(function (r) { return Object.assign({}, r); });
     if (!out.mouMap.length) out.mouMap = DEFAULT_MOU.map(function (r) { return Object.assign({}, r); });
@@ -2498,6 +2610,11 @@ var PSC = (function () {
       case 'saveVisitItem': return store.lock(function () { return saveVisitItem(store, user, payload); });
       case 'importPortPsc': return store.lock(function () { return importPortPsc(store, user, payload); });
       case 'importPortStats': return store.lock(function () { return importPortStats(store, user, payload); });
+      case 'updateDocument': return store.lock(function () { return updateDocument(store, user, payload); });
+      case 'deleteDocument': return store.lock(function () { return deleteDocument(store, user, payload); });
+      case 'restoreDocument': return store.lock(function () { return restoreDocument(store, user, payload); });
+      case 'saveIncidentUpdate': return store.lock(function () { return saveIncidentUpdate(store, user, payload); });
+      case 'deleteIncidentUpdate': return store.lock(function () { return deleteIncidentUpdate(store, user, payload); });
       case 'loadMouData': return store.lock(function () { return loadMouData(store, user, payload); });
       case 'importMouAnnual': return store.lock(function () { return importMouAnnual(store, user, payload); });
       case 'deletePortBatch': return store.lock(function () { return deletePortBatch(store, user, payload); });
@@ -2523,8 +2640,8 @@ var PSC = (function () {
     deadlines: deadlines, pscTier: pscTier, vesselAt: vesselAt, handle: handle,
     BRIBE_FIELDS: BRIBE_FIELDS, parseBribe: parseBribe, bribeFlag: bribeFlag, canBribe: canBribe, num: num,
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
-    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
-    TOKYO: TOKYO, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
+    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, evidenceDocs: evidenceDocs, UPD_STAGES: UPD_STAGES, UPD_CHANNELS: UPD_CHANNELS, DOC_DELETED: DOC_DELETED, utcMinute: utcMinute, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
+    TOKYO: TOKYO, TAIWAN_PSC: TAIWAN_PSC, TW_PORTS: TW_PORTS, twPort: twPort, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
     incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
     DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,
     STAGES_LIST: STAGES, reportTimeliness: reportTimeliness, incidentChecks: incidentChecks, ontimeStats: ontimeStats, ruleKey: ruleKey, DEFAULT_PORTS: DEFAULT_PORTS, portTable: portTable

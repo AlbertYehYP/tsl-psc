@@ -608,3 +608,50 @@ body.dragging-cards *{cursor:grabbing!important}
 .pi-sw{margin-right:6px;vertical-align:middle}
 @media (prefers-reduced-motion:reduce){.drag-ghost{transform:none}}
 @media print{.sort-hint,.drag-h{display:none!important}}
+
+/* v1.15 綜合資訊、快速連結、文件修改紀錄、事故更新紀錄 */
+#view .card{scroll-margin-top:16px}
+.hm-kpis{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px}
+.kpi.hk{border:0;text-align:left;cursor:pointer;font:inherit;color:inherit;background:var(--surface-2);box-shadow:none;transition:box-shadow .15s}
+.kpi.hk:hover,.kpi.hk:focus-visible{box-shadow:0 0 0 1.5px var(--accent)}
+.hm-col .section-head h2{font-size:16px}
+.hm-att{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.hm-a{width:100%;display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-areas:"ar t" "ar w";gap:1px 10px;align-items:center;text-align:left;border:0;border-radius:10px;padding:8px 10px;background:var(--surface-2);cursor:pointer;font:inherit;color:inherit;border-left:4px solid var(--line-2)}
+.hm-a:hover{box-shadow:0 0 0 1.5px var(--accent)}
+.hm-a.lv3{border-left-color:var(--rk-vl)}.hm-a.lv2{border-left-color:var(--rk-m)}.hm-a.lv1{border-left-color:var(--rk-h)}
+.hm-a .pill{grid-area:ar}.hm-at{grid-area:t;font-weight:600;font-size:13px}.hm-aw{grid-area:w;font-size:12px}
+.qnav{position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:60;display:flex;flex-direction:column;align-items:flex-end;gap:1px;max-height:82vh;overflow-y:auto;overflow-x:visible;padding:4px 2px}
+.qnav[hidden],.qnav-btn[hidden]{display:none!important}
+.qnav-list{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+.qn{display:flex;align-items:center;justify-content:flex-end;gap:8px;border:0;background:none;padding:4px 4px;cursor:pointer;font:inherit;color:var(--muted);max-width:240px}
+.qn-l{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;background:var(--surface);box-shadow:var(--shadow);padding:3px 10px;border-radius:999px;color:var(--ink-2);opacity:0;transform:translateX(8px);transition:opacity .15s,transform .15s;pointer-events:none}
+.qn-d{width:8px;height:8px;border-radius:50%;background:var(--line-2);flex:none;transition:width .15s,height .15s,background .15s;font-style:normal}
+.qn-d.qn-up{width:auto;height:auto;background:none;color:var(--muted);font-size:12px;line-height:1}
+.qnav:hover .qn-l,.qnav:focus-within .qn-l{opacity:1;transform:none}
+.qn:hover .qn-d{background:var(--accent)}
+.qn.on .qn-d{background:var(--accent);width:11px;height:11px;box-shadow:0 0 0 3px var(--accent-soft)}
+.qn.on .qn-l{color:var(--accent);font-weight:600}
+@media (min-width:1720px){.qn-l{opacity:1;transform:none;box-shadow:none;background:transparent;padding:2px 4px}.qnav:hover .qn-l{background:var(--surface);box-shadow:var(--shadow)}}
+.qnav-btn{display:none;position:fixed;right:14px;bottom:16px;z-index:61;border:0;border-radius:999px;padding:9px 14px;background:var(--accent);color:#fff;font:inherit;font-size:13px;box-shadow:var(--shadow);cursor:pointer}
+@media (max-width:900px){.qnav{display:none}.qnav-btn{display:block}.qnav.open{display:flex;top:auto;bottom:60px;transform:none;background:var(--surface);box-shadow:0 12px 32px rgba(0,0,0,.2);border-radius:14px;padding:8px}.qnav.open .qn-l{opacity:1;transform:none;box-shadow:none;background:transparent}}
+@media (prefers-reduced-motion:reduce){.qn-l,.qn-d{transition:none}}
+@media print{.qnav,.qnav-btn{display:none!important}}
+.hist{margin-top:3px;font-size:12px}.hist summary{cursor:pointer;color:var(--muted)}.hist ol{margin:4px 0 2px 18px;padding:0;color:var(--ink-2)}
+.doc-act{display:flex;gap:4px;justify-content:flex-end;margin-top:4px}
+.btn.danger-t{color:var(--crit)}
+.doc.gone a{text-decoration:line-through;color:var(--muted)}
+.doc-del{margin-top:10px;border-top:1px dashed var(--line-2);padding-top:6px;font-size:13px}.doc-del>summary{cursor:pointer;color:var(--muted)}
+.upd-list{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.upd{border-left:3px solid var(--accent);padding:6px 0 6px 12px}
+.upd.gone{border-left-color:var(--line-2);opacity:.75}.upd.gone .upd-c{text-decoration:line-through}
+.upd-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12.5px}
+.upd-t{font-weight:600}.upd-act{margin-left:auto;display:flex;gap:4px}
+.upd-c{white-space:pre-wrap;font-size:13.5px;margin:4px 0 2px;line-height:1.55}
+
+/* v1.16 台灣港口國檢查 */
+.mou.tw{color:var(--rk-m);font-weight:600}
+.tw-pick{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:-2px 0 6px;padding:8px 10px;border-radius:10px;background:var(--surface-2)}
+.tw-pick .tw-l{font-size:12.5px;font-weight:600;margin-right:4px}
+.tw-pick .chip{font-size:12.5px;padding:3px 10px}
+.tw-pick .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tw-pick .hint{flex-basis:100%;margin:2px 0 0}
