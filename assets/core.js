@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.17.1';
+  var VERSION = '1.17.2';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -2475,7 +2475,7 @@ var PSC = (function () {
     return teuLabel(below ? below.hi : 0, above ? above.lo : Infinity);
   }
   function ageBand(build, today) { if (!isoDate(build)) return ''; var a = daysBetween(isoDate(build), isoDate(today)) / 365.25; return a < 5 ? '0–5 年' : a < 10 ? '5–10 年' : a < 15 ? '10–15 年' : a < 20 ? '15–20 年' : '20 年以上'; }
-  function quarterList(from, to) { var out = [], y = +from.slice(0, 4), q = Math.floor((+from.slice(5, 7) - 1) / 3), ly = +to.slice(0, 4), lq = Math.floor((+to.slice(5, 7) - 1) / 3); while (y < ly || (y === ly && q <= lq)) { out.push({ label: y + '-Q' + (q + 1), d: y + '-' + String(q * 3 + 2).padStart(2, '0') + '-15' }); q++; if (q > 3) { q = 0; y++; } } return out; }
+  function quarterList(from, to) { from = isoDate(from) || ''; to = isoDate(to) || ''; var out = [], y = +from.slice(0, 4), q = Math.floor((+from.slice(5, 7) - 1) / 3), ly = +to.slice(0, 4), lq = Math.floor((+to.slice(5, 7) - 1) / 3); if (!(y > 1900) || !(ly > 1900) || isNaN(q) || isNaN(lq)) return out; while ((y < ly || (y === ly && q <= lq)) && out.length < 400) { out.push({ label: y + '-Q' + (q + 1), d: y + '-' + String(q * 3 + 2).padStart(2, '0') + '-15' }); q++; if (q > 3) { q = 0; y++; } } return out; }
   /** 一組檢查的滾動缺失比（每季，回看 win 季）：v = Σ(ISM×5＋其他) ÷ Σ檢查次數；沒有檢查的期間為 null */
   function rollingPscSeries(insps, from, to, win) {
     win = win || 4; var qs = quarterList(from, to), by = {};
@@ -2557,7 +2557,8 @@ var PSC = (function () {
     var qMap = {}; quarterIncidentPoints(allInc, cfg).forEach(function (p) { qMap[p.label] = p; });
     var first = [isoDate(ship.valid_from)].concat(allIns.map(function (i) { return isoDate(i.date); }), allInc.map(function (x) { return isoDate(x.date); }), vis.map(function (v) { return isoDate(v.date_from || v.report_date); })).filter(Boolean).sort()[0] || from;
     var iPts = [], qy = +first.slice(0, 4), qq = Math.floor((+first.slice(5, 7) - 1) / 3), ly = +today.slice(0, 4), lq = Math.floor((+today.slice(5, 7) - 1) / 3);
-    while (qy < ly || (qy === ly && qq <= lq)) { var lab = qy + '-Q' + (qq + 1), mid = qy + '-' + String(qq * 3 + 2).padStart(2, '0') + '-15', hit = qMap[lab]; iPts.push({ d: mid > today ? today : mid, v: hit ? hit.v : 0, w: 1, n: hit ? hit.n : 0, label: lab }); qq++; if (qq > 3) { qq = 0; qy++; } }
+    if (!(qy > 1900) || isNaN(qq) || isNaN(lq)) qy = ly + 1;  // 日期格式異常時不跑迴圈（避免無限迴圈）
+    while ((qy < ly || (qy === ly && qq <= lq)) && iPts.length < 400) { var lab = qy + '-Q' + (qq + 1), mid = qy + '-' + String(qq * 3 + 2).padStart(2, '0') + '-15', hit = qMap[lab]; iPts.push({ d: mid > today ? today : mid, v: hit ? hit.v : 0, w: 1, n: hit ? hit.n : 0, label: lab }); qq++; if (qq > 3) { qq = 0; qy++; } }
     var iAvg = iPts.length ? iPts.reduce(function (n, p) { return n + p.v; }, 0) / iPts.length : null;
     var pTrend = trendSummary(pPts, from, to, avg.def, 0.25), iTrend = trendSummary(iPts, from, to, iAvg, 2);
     // RightShip

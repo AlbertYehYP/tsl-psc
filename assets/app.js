@@ -14,7 +14,7 @@ const TAB_LIST = Object.values(SECTIONS).flatMap(x => x.tabs.map(t => t[0]));
 const secOf = t => Object.keys(SECTIONS).find(k => SECTIONS[k].tabs.some(x => x[0] === t)) || 'psc';
 const MAX_MB = 20;
 /** 前端程式版本（與 core.js 的 PSC.VERSION、後端 core.gs 必須一致） */
-const APP_VERSION = '1.17.1';
+const APP_VERSION = '1.17.2';
 /** 版本不一致警示：顯示在頁首下方，避免瀏覽器快取舊檔或漏更新某個檔案時沒人發現 */
 function versionBanner(kind, html) {
   let el = document.getElementById('ver-bar');
@@ -117,7 +117,7 @@ const Demo = {
 
 /* ---------- API / auth ---------- */
 const Auth = { token: null, email: '', name: '', exp: 0 };
-async function api(action, payload) {
+async function api(action, payload, opt) {
   if (CFG.demo && action === 'fetchUrl') throw new Error('示範模式不連線外部網站；請改用「匯入檢查／留置紀錄」上傳檔案或貼上表格');
   if (CFG.demo && window.__PSCAPP && typeof window.__PSCAPP.mock === 'function') { const mr = await window.__PSCAPP.mock(action, payload); if (mr !== undefined) return mr; }  // 示範版測試用：模擬登輪系統
   if (CFG.demo && action === 'registerSync') return { enabled: false, queue: [], created: [], requeued: [], errors: [] };
@@ -127,9 +127,12 @@ async function api(action, payload) {
   if (!Auth.token || Date.now() / 1000 > Auth.exp - 30) { showLogin('登入已過期，請重新登入'); throw new Error('登入已過期，請重新登入'); }
   if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]{20,}\/exec$/.test(String(CFG.apiUrl).trim())) throw new Error('config.js 的 apiUrl 不是 Apps Script 部署網址（應為 https://script.google.com/macros/s/……/exec，請整串貼上「管理部署作業」裡的網址）');
   let r, j;
-  try { r = await fetch(CFG.apiUrl.trim(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ idToken: Auth.token, action, payload: payload || {} }) }); }
-  catch (e) { throw new Error('連不到後端（Apps Script）。請確認：1) config.js 的 apiUrl 是「管理部署作業」裡的 /exec 網址；2) 部署的「具有存取權的使用者」是「所有人」；3) 用無痕視窗直接打開 apiUrl 會看到 {"ok":true…}'); }
-  try { j = await r.json(); } catch (e) { throw new Error('後端回傳的不是資料（HTTP ' + r.status + '）。通常是 Apps Script 尚未授權或部署設定錯誤：請在 Apps Script 執行一次 setup，再「管理部署作業 → 編輯 → 新版本 → 部署」'); }
+  const ac = typeof AbortController === 'function' ? new AbortController() : null, lim = (opt && opt.timeout) || 0;
+  const tm = ac && lim ? setTimeout(() => ac.abort(), lim) : null;
+  try { r = await fetch(CFG.apiUrl.trim(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ idToken: Auth.token, action, payload: payload || {} }), signal: ac ? ac.signal : undefined }); }
+  catch (e) { if (tm) clearTimeout(tm); if (e && e.name === 'AbortError') throw new Error(`後端（Apps Script）超過 ${Math.round(lim / 1000)} 秒沒有回應。請到 Apps Script「執行項目」查看 doPost 是否失敗或執行很久，然後重新整理再試一次。`); throw new Error('連不到後端（Apps Script）。請確認：1) config.js 的 apiUrl 是「管理部署作業」裡的 /exec 網址；2) 部署的「具有存取權的使用者」是「所有人」；3) 用無痕視窗直接打開 apiUrl 會看到 {"ok":true…}'); }
+  try { j = await r.json(); } catch (e) { if (tm) clearTimeout(tm); if (e && e.name === 'AbortError') throw new Error(`後端（Apps Script）超過 ${Math.round(lim / 1000)} 秒沒有傳完資料。請到 Apps Script「執行項目」查看 doPost，然後重新整理再試一次。`); throw new Error('後端回傳的不是資料（HTTP ' + r.status + '）。通常是 Apps Script 尚未授權或部署設定錯誤：請在 Apps Script 執行一次 setup，再「管理部署作業 → 編輯 → 新版本 → 部署」'); }
+  if (tm) clearTimeout(tm);
   if (!j.ok) throw new Error(/PSC is not defined/.test(j.error || '') ? '後端缺少 core.gs：請在 Apps Script 把「core」檔整份換成 apps-script/core.gs 的內容（開頭是「TSL PSC System — shared core logic」），「Code」檔放 Code.gs，儲存後部署新版本。' : (j.error || '伺服器錯誤'));
   if (action === 'bootstrap' && j.data && j.data.version && j.data.version !== PSC.VERSION) versionBanner('warn', `<b>前後端版本不同</b>：網頁 v${esc(PSC.VERSION)}、後端（Apps Script）v${esc(j.data.version)}。請把 Apps Script 的 core 檔換成同一版的 core.gs，並「管理部署作業 → 編輯 → 新版本」。`);
   return j.data;
@@ -2887,10 +2890,10 @@ function vAdmin(v) {
   <div class="field"><label for="tm-docs">高績效公司名單（ISM DOC 公司 IMO）</label><textarea class="inp mono" rows="2" id="tm-docs" data-tm="tmou_high_perf_docs">${esc(set.tmou_high_perf_docs || '')}</textarea><span class="hint">從「List of high performing companies」PDF 複製公司 IMO 即可，系統只看 7 位數字</span></div>
   <div class="btnrow"><button class="btn primary" type="button" id="tm-save">儲存</button></div></div></div>
   <div class="card" style="margin-bottom:16px" id="rg-card"><div class="section-head"><div><h2>登輪系統自動收件</h2><p class="sub" style="margin:2px 0 0">登輪審查系統收到的訪船報告自動轉入訪船缺失：讀登輪試算表的 REGISTER 分頁，狀態 Completed、符合下列申請方與類別、報告 PDF 在起始日以後上傳的案件。兩個系統要用同一個 Google 帳號部署。</p></div></div>
-  <div class="form"><div class="field"><label for="rg-sheet">登輪系統試算表網址</label><textarea class="inp mono" rows="2" id="rg-sheet" placeholder="https://docs.google.com/spreadsheets/d/…/edit">${esc(set.register_sheet_id || '')}</textarea><span class="hint">貼網址或 ID 都可以；不確定是哪一個就兩個都貼，用逗號隔開，系統自動用有 REGISTER 分頁的那一個。留空＝不自動收件</span></div>
+  <div class="form"><div class="field"><label for="rg-sheet">登輪系統試算表網址</label><textarea class="inp mono" rows="2" id="rg-sheet" placeholder="https://docs.google.com/spreadsheets/d/…/edit">${esc(set.register_sheet_id || '')}</textarea><span class="hint">貼網址或 ID 都可以；不確定是哪一個就兩個都貼，用逗號隔開，系統自動找登輪紀錄分頁（REGISTER，或表頭有 Reference、Status、ReportFile 的分頁；網址帶 gid 時先看那個分頁）。留空＝不自動收件</span></div>
   <div class="frow"><div class="field"><label for="rg-from">起始日</label><input class="inp" type="date" id="rg-from" value="${esc(PSC.isoDate(set.register_sync_from) || '2026-11-06')}"><span class="hint">這一天以後上傳的報告才自動建檔</span></div><div class="field"><label for="rg-party">申請方</label><input class="inp" id="rg-party" value="${esc(set.register_sync_parties || 'MGR')}"><span class="hint">MGR 船管；逗號分隔</span></div><div class="field"><label for="rg-type">訪船類別</label><input class="inp" id="rg-type" value="${esc(set.register_sync_types || 'VIR')}"><span class="hint">VIR 全船檢查；逗號分隔</span></div></div>
   <div class="btnrow"><button class="btn primary" type="button" id="rg-save">儲存</button><button class="btn" type="button" id="rg-test">儲存並立即檢查</button><span class="dim" id="rg-info" style="font-size:12.5px">${VSYNC.at ? `上次檢查 ${esc(VSYNC.at)} UTC：${esc(VSYNC.msg || '')}` : ''}</span></div><div id="rg-err" class="err">${VSYNC.errors.length ? VSYNC.errors.map(esc).join('<br>') : ''}</div></div></div>
-  <div class="grid g2" style="margin-bottom:16px"><div class="card"><div class="section-head"><h2>資料檢核</h2><button class="btn" type="button" id="dc-run">執行檢核</button></div><p class="sub">組員直接編輯 Google 試算表後，用這裡檢查編號重複、找不到對應、格式錯誤等問題。試算表選單「TSL PSC → 檢核資料」結果相同。</p><div id="dc-out"></div></div>
+  <div class="grid g2" style="margin-bottom:16px"><div class="card"><div class="section-head"><h2>資料檢核</h2><button class="btn" type="button" id="dc-run">執行檢核</button></div><p class="sub">組員直接編輯 Google 試算表後，用這裡檢查編號重複、找不到對應、格式錯誤等問題。試算表選單「TSL PSC → 檢核資料」結果相同。</p>${LOADT.at ? `<p class="note" style="margin:0 0 8px">${esc(loadSummary())}</p>` : ''}<div id="dc-out"></div></div>
   <div class="card"><h2>匯入船舶主檔 / NK 資料</h2><p class="sub">選擇船隊監控系統的 <span class="mono">fleet-data.js</span>（整個船隊一次匯入），或貼上 SHIP JSON。依 IMO 對應，更新船級、GT / DWT、TEU、登記船東等欄位與 NK 檢驗 / 證書到期。</p><div class="form"><input class="inp" type="file" id="nk-file" accept=".js,.json,application/json,text/javascript"><textarea class="inp mono" id="nk-text" rows="3" placeholder='{"vessel_master": {"imo_number": "9967512", ...}, "certificates": [...], "surveys": [...]}'></textarea><div class="field"><label for="nk-mode">寫入方式</label><select id="nk-mode"><option value="class">船級欄位以 Class 資料為準，其餘只補空白（建議）</option><option value="fill">只補空白欄位，不同值列出來確認</option><option value="overwrite">全部以主檔覆蓋</option></select></div><div class="btnrow"><button class="btn primary" type="button" id="nk-go">匯入</button><span class="dim" id="nk-info" style="font-size:12.5px"></span></div></div>
   <h2 style="margin-top:14px">管理公司（Tokyo MOU 績效）</h2><div class="tbl-wrap"><table><thead><tr><th>公司碼</th><th>名稱</th><th>DOC 公司 IMO</th><th>績效</th><th>日期</th><th>回信稱謂 / 收件人</th></tr></thead><tbody>${M.companies.map(c => `<tr class="click" data-co="${esc(c.code)}" title="${esc(c.note || '')}"><td class="mono">${esc(c.code)}</td><td>${esc(c.name)}</td><td class="mono">${esc(c.doc_imo)}</td><td>${esc(c.tmou_performance)}</td><td class="num">${dfmt(c.perf_as_of)}</td><td style="font-size:12px">${c.greeting || c.email_to ? `${esc(c.greeting || '')}<div class="dim">${esc(c.email_to || '')}</div>` : '<span class="dim">點一下設定</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚未匯入</td></tr>'}</tbody></table></div></div></div>
   <div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>MOU 對照表（港口國 → 檢查區域）</h2><p class="sub" style="margin:2px 0 0">新登錄的 PSC 檢查依港口國（與港口）自動帶入 MOU；有填港口的列優先。只有 MOU = Tokyo MOU 的檢查會重算 Tokyo MOU 窗口。Google 試算表的「MOUMap」分頁也可以直接編輯。</p></div><div class="btnrow"><button class="btn" type="button" id="m-new">新增一列</button><button class="btn" type="button" id="m-apply">補標空白的檢查</button><button class="btn" type="button" id="m-apply-all">全部依對照表重新套用</button><button class="btn" type="button" id="m-apply-tw" title="把港口國為 TAIWAN、但 MOU 不是 Taiwan MPB 的檢查改正">修正台灣檢查的 MOU</button></div></div>
@@ -3294,19 +3297,52 @@ function header() {
   $('#userbox').innerHTML = USER ? `<span><b>${esc(USER.name || USER.email)}</b> <span class="dim">${esc(USER.email)}</span></span><span class="role">${esc(USER.role)}</span>${CFG.demo ? '' : '<button class="btn ghost" type="button" id="logout">登出</button>'}` : '';
   const lo = $('#logout'); if (lo) lo.addEventListener('click', signOut);
 }
+/** 載入時間（v1.17.2）：fetch＝等後端回應（含後端讀取）、build＝整理資料、paint＝繪製畫面；server＝後端各分頁讀取毫秒數 */
+const LOADT = { at: '', fetch: 0, build: 0, paint: 0, server: null };
+function bootStage(t) { const el = $('#boot-stage'); if (el) el.textContent = t; }
 async function reload() {
-  RAW = await api('bootstrap');
+  const t0 = performance.now();
+  RAW = await api('bootstrap', null, { timeout: 150000 });
+  const t1 = performance.now(); bootStage('整理資料…');
   USER = RAW.user; M = buildModel(RAW);
   header();
   const keep = { years: new Set(S.years) };
   buildFilters(); S.years = keep.years; syncFilterUI();
+  const t2 = performance.now();
   render();
+  Object.assign(LOADT, { at: new Date().toISOString().slice(0, 16).replace('T', ' '), fetch: Math.round(t1 - t0), build: Math.round(t2 - t1), paint: Math.round(performance.now() - t2), server: RAW._timing || null });
+}
+/** 後端讀取最慢的分頁（文字） */
+function loadSlowest(n) {
+  const tb = (LOADT.server && LOADT.server.tables) || {};
+  return Object.entries(tb).sort((a, b) => b[1].ms - a[1].ms).slice(0, n || 3).map(([k, o]) => `${k} ${(o.ms / 1000).toFixed(1)} 秒（${fmt(o.rows)} 列）`).join('、');
+}
+function loadSummary() {
+  if (!LOADT.at) return '';
+  const sv = LOADT.server, sec = ms => (ms / 1000).toFixed(1);
+  return `上次載入 ${LOADT.at} UTC：等待後端 ${sec(LOADT.fetch)} 秒${sv ? `（後端執行 ${sec(sv.total)} 秒，其中登入驗證 ${sec(sv.auth)} 秒；最慢的分頁：${loadSlowest(3) || '—'}）` : ''}、整理資料 ${sec(LOADT.build)} 秒、繪製畫面 ${sec(LOADT.paint)} 秒`;
 }
 async function start() {
   hideChrome(false);
-  $('#view').innerHTML = '<div class="empty">載入資料中…</div>';
-  try { await reload(); setTimeout(() => autoVirSync(false), 300); }
-  catch (e) { if (CFG.demo) { $('#view').innerHTML = `<div class="card err">${esc(e.message)}</div>`; } else showLogin(e.message); }
+  const t0 = Date.now();
+  $('#view').innerHTML = '<div class="empty boot"><div id="boot-stage">驗證登入並向後端讀取資料…</div><div class="dim" id="boot-wait" style="font-size:12.5px;margin-top:6px"></div></div>';
+  const tick = setInterval(() => {
+    const el = $('#boot-wait'); if (!el) { clearInterval(tick); return; }
+    const sec = Math.round((Date.now() - t0) / 1000);
+    el.innerHTML = `已等待 ${sec} 秒` + (sec >= 20 ? '<br>後端（Apps Script）回應較慢：剛部署新版本後的第一次開啟、試算表資料列很多或 Google 服務忙碌都會變慢。超過 150 秒會自動停止並說明原因。' : '');
+  }, 1000);
+  try {
+    await reload();
+    if (LOADT.fetch > 15000) console.warn('[TSL PSC] 載入偏慢', JSON.stringify(LOADT));
+    if (LOADT.fetch > 15000 && can('admin')) toast('這次載入花了 ' + Math.round(LOADT.fetch / 1000) + ' 秒。最慢的分頁：' + (loadSlowest(3) || '—') + '（系統管理 → 資料檢核可看詳細）', 12000);
+    setTimeout(() => autoVirSync(false), 300);
+  }
+  catch (e) {
+    if (CFG.demo) { $('#view').innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+    else if (/後端|Apps Script|config\.js/.test(e.message) && Auth.token) { $('#view').innerHTML = `<div class="card"><h2 style="font-size:17px">無法載入資料</h2><p class="err">${esc(e.message)}</p><div class="btnrow"><button class="btn primary" type="button" id="boot-retry">重試</button></div></div>`; $('#boot-retry').addEventListener('click', () => start()); }
+    else showLogin(e.message);
+  }
+  finally { clearInterval(tick); }
 }
 
 (() => { const first = document.querySelector('#sections .sec'); if (!first || document.querySelector('[data-sec="home"]')) return; const b = document.createElement('button'); b.className = 'sec sec-home'; b.setAttribute('role', 'tab'); b.type = 'button'; b.dataset.sec = 'home'; b.innerHTML = '<b>綜合資訊</b><small id="m-home">事故・PSC・訪船</small>'; first.parentNode.insertBefore(b, first); })();
@@ -3345,5 +3381,5 @@ if (CFG.demo) {
   if (tok && p.exp && Date.now() / 1000 < p.exp - 60) { Object.assign(Auth, { token: tok, email: p.email, name: p.name, exp: p.exp }); start(); }
   else showLogin();
 }
-window.__PSCAPP = { get M() { return M; }, S, api, reload, autoVirSync, VSYNC };
+window.__PSCAPP = { get M() { return M; }, S, api, reload, autoVirSync, VSYNC, LOADT };
 })();
