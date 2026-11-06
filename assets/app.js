@@ -14,7 +14,7 @@ const TAB_LIST = Object.values(SECTIONS).flatMap(x => x.tabs.map(t => t[0]));
 const secOf = t => Object.keys(SECTIONS).find(k => SECTIONS[k].tabs.some(x => x[0] === t)) || 'psc';
 const MAX_MB = 20;
 /** 前端程式版本（與 core.js 的 PSC.VERSION、後端 core.gs 必須一致） */
-const APP_VERSION = '1.16.0';
+const APP_VERSION = '1.17.0';
 /** 版本不一致警示：顯示在頁首下方，避免瀏覽器快取舊檔或漏更新某個檔案時沒人發現 */
 function versionBanner(kind, html) {
   let el = document.getElementById('ver-bar');
@@ -119,6 +119,9 @@ const Demo = {
 const Auth = { token: null, email: '', name: '', exp: 0 };
 async function api(action, payload) {
   if (CFG.demo && action === 'fetchUrl') throw new Error('示範模式不連線外部網站；請改用「匯入檢查／留置紀錄」上傳檔案或貼上表格');
+  if (CFG.demo && window.__PSCAPP && typeof window.__PSCAPP.mock === 'function') { const mr = await window.__PSCAPP.mock(action, payload); if (mr !== undefined) return mr; }  // 示範版測試用：模擬登輪系統
+  if (CFG.demo && action === 'registerSync') return { enabled: false, queue: [], created: [], requeued: [], errors: [] };
+  if (CFG.demo && action === 'registerPdf') throw new Error('示範模式不連線登輪系統');
   if (CFG.demo && (action === 'mouWatchNow' || action === 'mouPdf')) throw new Error('示範模式不連線外部網站；正式版由後端每季自動檢查 Tokyo MOU、Paris MOU 官網的年報');
   if (CFG.demo) return Demo.call(action, payload || {});
   if (!Auth.token || Date.now() / 1000 > Auth.exp - 30) { showLogin('登入已過期，請重新登入'); throw new Error('登入已過期，請重新登入'); }
@@ -448,7 +451,7 @@ function vVfOverview(v) {
   const byCo = {}; M.visits.forEach(x => { const o = byCo[x.company] || (byCo[x.company] = { visits: 0, items: [] }); o.visits++; o.items.push(...x.items); });
   const coRows = Object.entries(byCo).sort((a, b) => coLabel(a[0]) < coLabel(b[0]) ? -1 : 1).map(([c, o]) => { const s2 = PSC.visitStats(o.items, today()); const days = o.items.map(it => it.st.closeDays).filter(n => n !== null); return `<tr><td><b>${esc(coLabel(c))}</b></td><td class="n">${o.visits}</td><td class="n">${s2.total}</td><td class="n">${s2.open}</td><td class="n">${s2.submitted}</td><td class="n ${s2.overdue ? 'flag' : ''}">${s2.overdue}</td><td class="n">${s2.closed}</td><td class="n">${s2.ontimeRate === null ? '–' : Math.round(s2.ontimeRate * 100) + '%'}</td><td class="n">${days.length ? Math.round(days.reduce((a, b) => a + b, 0) / days.length) + ' 天' : '–'}</td></tr>`; }).join('');
   const hot = items.filter(it => it.st.active && (it.st.overdue || (it.st.daysLeft !== null && it.st.daysLeft <= 14))).sort((a, b) => (a.due_date || '9') < (b.due_date || '9') ? -1 : 1).slice(0, 30);
-  v.innerHTML = `<div class="kpis">${kpi('待改善', st.open, '船管尚未提交矯正')}${kpi('逾期', st.overdue, '超過改善期限仍待改善', st.overdue ? 'crit' : '')}${kpi('待確認', st.submitted, '已提交矯正，等 PIC 確認關閉')}${kpi('14 天內到期', st.dueSoon, '請提醒船管')}${kpi('已關閉', st.closed, `關閉率 ${st.closeRate === null ? '–' : Math.round(st.closeRate * 100) + '%'}・準時 ${st.ontimeRate === null ? '–' : Math.round(st.ontimeRate * 100) + '%'}`)}</div>
+  v.innerHTML = vsyncHTML() + `<div class="kpis">${kpi('待改善', st.open, '船管尚未提交矯正')}${kpi('逾期', st.overdue, '超過改善期限仍待改善', st.overdue ? 'crit' : '')}${kpi('待確認', st.submitted, '已提交矯正，等 PIC 確認關閉')}${kpi('14 天內到期', st.dueSoon, '請提醒船管')}${kpi('已關閉', st.closed, `關閉率 ${st.closeRate === null ? '–' : Math.round(st.closeRate * 100) + '%'}・準時 ${st.ontimeRate === null ? '–' : Math.round(st.ontimeRate * 100) + '%'}`)}</div>
   <div class="grid g2" style="margin-bottom:16px"><div class="card"><div class="section-head"><h2>逾期與 14 天內到期（${hot.length}）</h2><button class="btn" type="button" id="vf-all">全部缺失</button></div>
   ${hot.length ? `<div class="tbl-wrap" style="max-height:440px"><table><thead><tr><th>期限</th><th>船舶</th><th>項目</th><th>缺失</th><th>狀態</th></tr></thead><tbody>${hot.map(it => `<tr class="click" data-vi="${esc(it.item_id)}"><td>${dueTxt(it)}</td><td>${esc(it.v ? it.v.vessel : '')}<div class="dim mono" style="font-size:11px">${esc(it.visit_no)}</div></td><td class="mono" style="font-size:12px">${esc(it.ref)}<div class="dim">${esc(it.area)}</div></td><td style="font-size:12.5px">${esc(it.finding)}</td><td>${vsPill(it)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="note">目前沒有逾期或即將到期的缺失。</p>'}</div>
   <div class="card"><h2 style="margin-bottom:8px">管理公司矯正表現</h2><div class="tbl-wrap"><table><thead><tr><th>公司</th><th class="n">訪船</th><th class="n">缺失</th><th class="n">待改善</th><th class="n">待確認</th><th class="n">逾期</th><th class="n">已關閉</th><th class="n">準時提交</th><th class="n">平均關閉</th></tr></thead><tbody>${coRows || '<tr><td colspan="9" class="empty">尚無訪船紀錄</td></tr>'}</tbody></table></div>
@@ -465,10 +468,10 @@ function vVisits(v) {
   const f = S.vfF || (S.vfF = { st: '', co: '', party: '', q: '' });
   const cos = [...new Set(M.visits.map(x => x.company))].sort();
   const list = M.visits.filter(x => (!f.co || x.company === f.co) && (!f.party || x.party === f.party) && (!f.st || (f.st === 'open' ? !x.closed : x.closed)) && (!f.q || (x.visit_no + ' ' + x.vessel + ' ' + x.inspector + ' ' + x.port).toLowerCase().includes(f.q.toLowerCase())));
-  v.innerHTML = `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>訪船紀錄</h2><p class="sub" style="margin:2px 0 0">每次登輪（管理公司 VIR、船東訪船、稽核等）一筆，編號沿用船管登輪審查系統的配號，例 TEH-VICTORY-2026-01-MGR-VIR。報告中的缺失逐項追蹤到關閉。</p></div>${can('editor') ? '<div class="btnrow"><button class="btn" type="button" id="vs-new">新增訪船紀錄</button><button class="btn primary" type="button" id="vs-pdf">上傳 VIR 報告 PDF</button></div>' : ''}</div>
+  v.innerHTML = vsyncHTML() + `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>訪船紀錄</h2><p class="sub" style="margin:2px 0 0">每次登輪（管理公司 VIR、船東訪船、稽核等）一筆，編號沿用船管登輪審查系統的配號，例 TEH-VICTORY-2026-01-MGR-VIR。報告中的缺失逐項追蹤到關閉。</p></div>${can('editor') ? '<div class="btnrow"><button class="btn" type="button" id="vs-new">新增訪船紀錄</button><button class="btn primary" type="button" id="vs-pdf">上傳 VIR 報告 PDF</button></div>' : ''}</div>
   <div class="rp-ctl"><div class="chips">${[['', '全部'], ['open', '有未關閉缺失'], ['closed', '已全部關閉']].map(([k, l]) => `<button class="chip" type="button" data-vst="${k}" aria-pressed="${f.st === k}">${l}</button>`).join('')}</div>
   <label class="pl-sel">管理公司 <select id="vs-co">${opt('', '全部', !f.co)}${cos.map(c => opt(c, coLabel(c), f.co === c)).join('')}</select></label><label class="pl-sel">檢查方 <select id="vs-party">${opt('', '全部', !f.party)}${Object.entries(PSC.VISIT_PARTY).map(([k, l]) => opt(k, k + ' ' + l, f.party === k)).join('')}</select></label><input class="inp" id="vs-q" placeholder="搜尋編號、船名、檢查員、港口" value="${esc(f.q)}" style="max-width:260px"></div></div>
-  <div class="vgrid">${list.length ? list.map(x => `<button type="button" class="vcard vfcard${x.stats.overdue ? ' risk-vl' : x.closed ? ' risk-h' : ''}" data-vno="${esc(x.visit_no)}"><span class="mono" style="font-size:12px">${esc(x.visit_no)}</span><span class="nm">${esc(x.vessel)} ${partyTag(x.party)} <span class="pill cat">${esc(x.vtype)}</span></span><span class="zh">${dfmt(x.date_from)}${x.date_to && x.date_to !== x.date_from ? ' ~ ' + dfmt(x.date_to) : ''}${x.port ? '・' + esc(x.port) : ''}${x.inspector ? '・' + esc(x.inspector) : ''}</span>${vfBar(x.stats)}<span class="st">${vfStatsLine(x.stats)}</span>${(b => b.ok === false ? `<span class="st flag">報告 ${b.report} 項，已登錄 ${b.found} 項</span>` : b.ok ? `<span class="st vr-okt">✓ 與報告 ${b.report} 項相符</span>` : '')(PSC.visitBreakdown(x, x.items))}</button>`).join('') : '<div class="empty">沒有符合條件的訪船紀錄</div>'}</div>`;
+  <div class="vgrid">${list.length ? list.map(x => `<button type="button" class="vcard vfcard${x.stats.overdue ? ' risk-vl' : x.closed ? ' risk-h' : ''}" data-vno="${esc(x.visit_no)}"><span class="mono" style="font-size:12px">${esc(x.visit_no)}${x.sync_status === PSC.SYNC.REVIEW ? ' <span class="flag">待確認</span>' : x.sync_status === PSC.SYNC.DONE && x.src_file_id ? ' <span class="dim" title="登輪系統報告自動建檔">⟳ 自動</span>' : ''}</span><span class="nm">${esc(x.vessel)} ${partyTag(x.party)} <span class="pill cat">${esc(x.vtype)}</span></span><span class="zh">${dfmt(x.date_from)}${x.date_to && x.date_to !== x.date_from ? ' ~ ' + dfmt(x.date_to) : ''}${x.port ? '・' + esc(x.port) : ''}${x.inspector ? '・' + esc(x.inspector) : ''}</span>${vfBar(x.stats)}<span class="st">${vfStatsLine(x.stats)}</span>${(b => b.ok === false ? `<span class="st flag">報告 ${b.report} 項，已登錄 ${b.found} 項</span>` : b.ok ? `<span class="st vr-okt">✓ 與報告 ${b.report} 項相符</span>` : '')(PSC.visitBreakdown(x, x.items))}</button>`).join('') : '<div class="empty">沒有符合條件的訪船紀錄</div>'}</div>`;
   v.querySelectorAll('[data-vst]').forEach(b => b.addEventListener('click', () => { f.st = b.dataset.vst; render(); }));
   $('#vs-co').addEventListener('change', e => { f.co = e.target.value; render(); });
   $('#vs-party').addEventListener('change', e => { f.party = e.target.value; render(); });
@@ -476,6 +479,76 @@ function vVisits(v) {
   v.querySelectorAll('[data-vno]').forEach(b => b.addEventListener('click', () => openVisit(b.dataset.vno)));
   sortableCards((v.querySelector('.vgrid > [data-vno]') || {}).parentElement, { key: 'visits', attr: 'vno' });
   const nb = $('#vs-new'); if (nb) nb.addEventListener('click', () => editVisit(null)); const pb = $('#vs-pdf'); if (pb) pb.addEventListener('click', () => virPdfModal(null));
+}
+/* ---------- 登輪系統報告自動建檔（v1.17）：開網頁時收件 → 逐份判讀 → 相符直接建檔、不相符標「待確認」 ---------- */
+const VSYNC = { running: false, at: '', msg: '', done: [], review: [], errors: [], enabled: null };
+const b64bytes = b => { const bin = atob(b), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; };
+function vsyncBar(txt) { VSYNC.msg = txt; const el = $('#vsync-bar'); if (el) el.outerHTML = vsyncHTML(); }
+async function autoVirSync(manual) {
+  if (VSYNC.running || !can('editor')) return;
+  VSYNC.running = true; VSYNC.errors = []; vsyncBar('檢查登輪系統的新報告…');
+  let changed = false;
+  try {
+    const r = await api('registerSync', {});
+    VSYNC.enabled = r.enabled; VSYNC.errors = r.errors || [];
+    if (!r.enabled) { VSYNC.msg = ''; return; }
+    if (r.created.length || r.requeued.length) { changed = true; await reload(); }
+    const q = [...new Set(r.queue)];
+    for (let i = 0; i < q.length; i++) { vsyncBar(`自動建檔：判讀第 ${i + 1} / ${q.length} 份報告（${q[i]}）…`); const res = await autoVirOne(q[i]); if (res) changed = true; }
+    VSYNC.at = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    VSYNC.msg = q.length ? `已處理 ${q.length} 份報告` : '沒有新報告';
+    if (q.length) toast(`登輪系統報告：自動建檔 ${VSYNC.done.length} 份${VSYNC.review.length ? `、待確認 ${VSYNC.review.length} 份` : ''}`, 8000);
+    else if (manual) toast('登輪系統沒有新的報告');
+  } catch (e) { VSYNC.errors.push(e.message || String(e)); VSYNC.msg = '自動收件失敗'; }
+  finally { VSYNC.running = false; if (changed) await reload(); else vsyncBar(VSYNC.msg); }
+}
+/** 判讀一份報告；回傳 true 表示有寫入資料 */
+async function autoVirOne(no) {
+  const mark = (status, note) => api('setVisitSync', { visit_no: no, status, note });
+  let f;
+  try { f = await api('registerPdf', { visit_no: no }); } catch (e) { VSYNC.errors.push(no + '：' + e.message); return false; }
+  if (f.busy) return false;
+  if (f.tooBig) { VSYNC.review.push(no); return true; }
+  try {
+    const file = new File([b64bytes(f.base64)], f.name || (no + '.pdf'), { type: 'application/pdf' });
+    const pages = await pdfTextPages(file), parse = PSC.parseInspectionPages(pages), sm = parse.summary;
+    const v = M.visits.find(x => x.visit_no === no), ship = shipByName(sm.vessel);
+    if (sm.defects === null && !parse.defects.length) { await mark(PSC.SYNC.REVIEW, '認不出報告格式（目前支援 FML Paris、V.Ships Shipsure、BSM）'); VSYNC.review.push(no); return true; }
+    if (v && ship && String(ship.imo || ship.vessel) !== String(v.imo || v.vessel)) { await mark(PSC.SYNC.REVIEW, `報告上的船名 ${sm.vessel} 與訪船編號的船舶 ${v.vessel} 不同`); VSYNC.review.push(no); return true; }
+    const found = parse.defects.length, rep = parse.format === 'SHIPSURE' || parse.format === 'BSM' ? found : sm.defects;
+    if (!parse.ok) { await mark(PSC.SYNC.REVIEW, `比對不符：報告 ${rep ?? '?'} 項／讀到 ${found} 項，請人工確認`); VSYNC.review.push(no); return true; }
+    const d = new Date(today() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 30);
+    const msg = await importVirJob({ file, parse, visitNo: no }, { upd: true, upl: false, defDue: d.toISOString().slice(0, 10) });
+    await mark(PSC.SYNC.DONE, `自動建檔：比對相符 ${found} 項・${msg.replace(no + '：', '')}${/progress/i.test(sm.status || '') ? '・報告仍是 In progress，定稿重傳後會自動更新' : ''}`);
+    VSYNC.done.push(no); return true;
+  } catch (e) { await mark(PSC.SYNC.REVIEW, '判讀失敗：' + (e.message || e)).catch(() => {}); VSYNC.review.push(no); return true; }
+}
+function vsyncHTML() {
+  if (!can('editor') || (CFG.demo && VSYNC.enabled !== true)) return '<div id="vsync-bar" hidden></div>';
+  const rv = M.visits.filter(x => x.sync_status === PSC.SYNC.REVIEW), pend = M.visits.filter(x => x.sync_status === PSC.SYNC.PENDING || x.sync_status === PSC.SYNC.BUSY);
+  if (VSYNC.enabled === false && !rv.length) return '<div id="vsync-bar" class="vsync dim">登輪系統自動收件未啟用（系統管理 → 設定 register_sheet_id）。</div>';
+  return `<div id="vsync-bar" class="vsync${rv.length ? ' warn' : ''}"><span class="vs-dot${VSYNC.running ? ' on' : ''}"></span><b>登輪系統自動建檔</b>
+    <span>${esc(VSYNC.running ? VSYNC.msg : (VSYNC.at ? `最近檢查 ${VSYNC.at} UTC・${VSYNC.msg}` : '開啟網頁時自動檢查'))}</span>
+    ${rv.length ? `<span class="flag">待確認 ${rv.length} 份：${rv.map(x => `<a href="#" data-vsgo="${esc(x.visit_no)}">${esc(x.visit_no)}</a>`).join('、')}</span>` : ''}${pend.length && !VSYNC.running ? `<span>待建檔 ${pend.length} 份</span>` : ''}
+    ${VSYNC.errors.length ? `<span class="flag" title="${esc(VSYNC.errors.join('\n'))}">${esc(VSYNC.errors[0])}${VSYNC.errors.length > 1 ? ` 等 ${VSYNC.errors.length} 項` : ''}</span>` : ''}
+    <button class="btn sm ghost" type="button" data-vsrun ${VSYNC.running ? 'disabled' : ''}>立即檢查</button></div>`;
+}
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-vsgo]'); if (g) { e.preventDefault(); openVisit(g.dataset.vsgo); return; }
+  const r = e.target.closest('[data-vsrun]'); if (r) autoVirSync(true);
+});
+/** 訪船詳情：自動建檔狀態與人工確認 */
+function visitSyncHTML(x) {
+  if (!x.src_file_id) return '';
+  const st = x.sync_status || '', cls = st === PSC.SYNC.REVIEW ? 'callout' : 'note', ed = can('editor');
+  return `<div class="${cls} vsync-d" style="margin:10px 0 0"><b>登輪系統報告・${esc(st || '—')}</b>${x.sync_at ? ` <span class="dim">${dfmt(x.sync_at)}</span>` : ''}${x.sync_note ? `<div>${esc(x.sync_note)}</div>` : ''}
+    <div class="btnrow" style="margin-top:6px">${x.report_url ? `<a class="btn sm ghost" href="${esc(x.report_url)}" target="_blank" rel="noopener">開啟報告（${esc(x.src_file_name || 'PDF')}）</a>` : ''}
+    ${ed && st !== PSC.SYNC.DONE ? '<button class="btn sm primary" type="button" id="vs-review">人工確認並匯入</button>' : ''}${ed && st === PSC.SYNC.REVIEW ? '<button class="btn sm ghost" type="button" id="vs-skip">略過這份報告</button>' : ''}${ed && st === PSC.SYNC.DONE ? '<button class="btn sm ghost" type="button" id="vs-redo">重新判讀</button>' : ''}</div></div>`;
+}
+function wireVisitSync(x) {
+  const rv = $('#vs-review'); if (rv) rv.addEventListener('click', () => run(async () => { const f = await api('registerPdf', { visit_no: x.visit_no, force: true }); if (!f.base64) throw new Error('無法讀取報告檔'); virPdfModal(x, { files: [new File([b64bytes(f.base64)], f.name, { type: 'application/pdf' })] }); }, rv));
+  const sk = $('#vs-skip'); if (sk) sk.addEventListener('click', () => { const why = prompt('略過原因（會留在紀錄裡），例：報告非 VIR 格式，改用貼上匯入'); if (why && why.trim()) run(async () => { await api('setVisitSync', { visit_no: x.visit_no, status: PSC.SYNC.SKIP, note: why.trim() }); await reload(); }); });
+  const rd = $('#vs-redo'); if (rd) rd.addEventListener('click', () => run(async () => { await api('setVisitSync', { visit_no: x.visit_no, status: PSC.SYNC.PENDING, note: '手動要求重新判讀' }); await reload(); await autoVirSync(true); }, rd));
 }
 function visitItemsTable(items, opts) {
   opts = opts || {};
@@ -500,10 +573,11 @@ function visitDetail(v, x) {
   <dl class="facts">${facts.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join('')}</dl>
   ${x.note ? `<div class="note" style="white-space:pre-wrap">${esc(x.note)}</div>` : ''}
   <div style="margin-top:12px">${vfBar(x.stats)}<div class="st vf-stl">${vfStatsLine(x.stats)}<span class="dim">${Object.entries(secs).map(([k, n]) => `${esc(k)} ${n}`).join('・')}</span></div></div>
-  ${visitReconHTML(x)}</div>
+  ${visitReconHTML(x)}${visitSyncHTML(x)}</div>
   <div class="card" style="margin-bottom:16px"><div class="section-head"><h2>缺失追蹤（${x.stats.total}）</h2><span class="dim" style="font-size:12.5px">點一列開啟：填矯正措施、提交、確認關閉、退回；可勾選多項一次處理</span></div>${bulkBarHTML()}${visitItemsTable(x.items)}</div>
   <div class="card"><div class="section-head"><h2>報告與矯正文件（${x.docs.length}）</h2><span class="dim" style="font-size:12.5px">Drive：訪船 / ${esc((x.date_from || x.report_date || '').slice(0, 4))} / ${esc(x.visit_no)}；說明欄填缺失編號（例 ${esc(x.visit_no)}-03）可連到該項</span></div>${ed ? uploadHTML(x.visit_no, 'visit') : ''}${docListHTML(x.docs, 'visit', x.docsDel)}</div>`;
   $('#vd-back').addEventListener('click', () => { S.visitNo = null; render(); });
+  wireVisitSync(x);
   $('#vd-hist').addEventListener('click', () => { S.histShip = String(x.imo || x.vessel); setTab('vf-ships'); });
   if (ed) { $('#vd-edit').addEventListener('click', () => editVisit(x)); $('#vd-import').addEventListener('click', () => importItemsModal(x)); $('#vd-pdf').addEventListener('click', () => virPdfModal(x)); $('#vd-add').addEventListener('click', () => importItemsModal(x, true)); wireUpload(x.visit_no, x.docs, { tracking_no: x.visit_no }); }
   wireItemsTable(v);
@@ -752,7 +826,24 @@ function virJobHTML(job, i) {
     ${virReconHTML(job)}
     <details class="vr-items"><summary>缺失清單（${r.defects.length} 項，標「已有」的編號不重複建立）</summary>${virItemsHTML(job)}</details></div>`;
 }
-function virPdfModal(x) {
+/** 匯入一份已判讀的 VIR 報告：建立／更新訪船、建立缺失（已有的合併）、可選擇把 PDF 歸檔到 Drive。手動上傳與登輪系統自動建檔共用 */
+async function importVirJob(j, o) {
+  const upd = o.upd !== false, upl = !!o.upl, defDue = o.defDue || '';
+    const sm = j.parse.summary, ex = M.visits.find(v => v.visit_no === j.visitNo), ship = shipByName(sm.vessel), p = PSC.parseVisitNo(j.visitNo) || {};
+    const row = { visit_no: j.visitNo, is_new: !ex };
+    const shp = j.parse.format === 'SHIPSURE' || j.parse.format === 'BSM';
+    if (!ex) Object.assign(row, { vessel: ship ? ship.vessel : '', party: p.party || 'MGR', vtype: p.vtype || 'VIR', date_from: sm.date || '', date_to: sm.date_to || '' });
+    if (!ex || upd) Object.assign(row, { score: sm.score, reported_defects: shp ? j.parse.defects.length : sm.defects ?? '', tasks: sm.tasks ?? '', reported_breakdown: PSC.breakdownText(sm.categories), report_status: sm.status, inspector: (ex && ex.inspector) || [sm.by, shp && sm.company ? '(' + sm.company + ')' : ''].filter(Boolean).join(' '), port: (ex && ex.port) || (shp ? sm.at : [sm.at, sm.type].filter(Boolean).join('（') + (sm.type ? '）' : '')) });
+    if (shp && sm.comments && !(ex && ex.note)) row.note = 'V.Ships 檢查意見：' + sm.comments;
+    if (ex && !ex.date_from && sm.date) row.date_from = sm.date;
+    await api('saveVisit', row);
+    const r = await api('importVisitItems', { visit_no: j.visitNo, items: j.parse.defects.map(d => d.due_date || !defDue ? d : Object.assign({}, d, { due_date: defDue })), update_existing: true });
+    if (upl && j.upErr) throw new Error(j.upErr + '。可取消勾選「PDF 歸檔到 Drive」只匯入缺失');
+    const ub = j.up ? j.up.blob : j.file;
+    if (upl) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: j.file.name, mime: 'application/pdf', size: ub.size, base64: await fileB64(ub), note: (j.parse.format === 'BSM' ? `BSM ${j.parse.defects.length} ${j.parse.mode === 'body' ? 'findings from answers (no deficiency appendix)' : 'deficiencies'} / ${sm.tasks} questions` : j.parse.format === 'SHIPSURE' ? `V.Ships Shipsure ${j.parse.defects.length} findings（${Object.entries(sm.byType || {}).map(([k, v]) => k + ' ' + v).join('、')}）・cleared ${sm.cleared}` : `VIR ${sm.defects ?? '?'} defects / ${sm.tasks ?? '?'} tasks・score ${sm.score || '—'}・${sm.status || ''}`) + (j.up ? shrinkNote(j.up) : '') });
+  return (`${j.visitNo}：新增 ${r.added.length}${r.skipped ? '、已有 ' + r.skipped : ''}${r.updated && r.updated.length ? '（補齊 ' + r.updated.length + '）' : ''}`);
+}
+function virPdfModal(x, pre) {
   const jobs = [];
   openModal({ title: '上傳 VIR 報告 PDF', sub: x ? esc(x.visit_no) : '自動讀出缺失、比對報告摘要的缺失數，並建立／更新訪船紀錄', wide: true,
     html: `<div class="form"><label class="vr-drop" id="vr-drop"><input type="file" id="vr-file" accept="application/pdf,.pdf" multiple hidden><b>選擇或拖曳 VIR 報告 PDF</b><span class="dim">可一次多份。檔名開頭若是訪船編號（例 TEH-VICTORY-2026-01-MGR-VIR_VIR Report.pdf）會自動對應${x ? '；否則歸到目前這筆訪船' : '；否則依船名與日期產生新編號'}。支援 FML（Paris）、V.Ships（Shipsure）、BSM 三種報告格式，自動判斷。超過 ${MAX_MB} MB 的 PDF 會自動壓縮照片後歸檔（文字與表格不變）。</span></label>
@@ -794,6 +885,7 @@ function virPdfModal(x) {
       ['dragenter', 'dragover'].forEach(t => dz.addEventListener(t, e => { e.preventDefault(); dz.classList.add('on'); }));
       ['dragleave', 'drop'].forEach(t => dz.addEventListener(t, e => { e.preventDefault(); dz.classList.remove('on'); }));
       dz.addEventListener('drop', e => add([...e.dataTransfer.files]));
+      if (pre && pre.files) add(pre.files);
       go.addEventListener('click', () => {
         const bad = jobs.find(j => j.parse.defects.length && !PSC.parseVisitNo(j.visitNo) && !M.visits.some(v => v.visit_no === j.visitNo));
         if (bad) { q('#vr-err').textContent = bad.file.name + '：請填訪船編號（格式 船名-年度-序號-檢查方-類別）'; return; }
@@ -802,19 +894,8 @@ function virPdfModal(x) {
           const out = [];
           for (const j of jobs) {
             if (!j.parse.defects.length) continue;
-            const sm = j.parse.summary, ex = M.visits.find(v => v.visit_no === j.visitNo), ship = shipByName(sm.vessel), p = PSC.parseVisitNo(j.visitNo) || {};
-            const row = { visit_no: j.visitNo, is_new: !ex };
-            const shp = j.parse.format === 'SHIPSURE' || j.parse.format === 'BSM';
-            if (!ex) Object.assign(row, { vessel: ship ? ship.vessel : '', party: p.party || 'MGR', vtype: p.vtype || 'VIR', date_from: sm.date || '', date_to: sm.date_to || '' });
-            if (!ex || upd) Object.assign(row, { score: sm.score, reported_defects: shp ? j.parse.defects.length : sm.defects ?? '', tasks: sm.tasks ?? '', reported_breakdown: PSC.breakdownText(sm.categories), report_status: sm.status, inspector: (ex && ex.inspector) || [sm.by, shp && sm.company ? '(' + sm.company + ')' : ''].filter(Boolean).join(' '), port: (ex && ex.port) || (shp ? sm.at : [sm.at, sm.type].filter(Boolean).join('（') + (sm.type ? '）' : '')) });
-            if (shp && sm.comments && !(ex && ex.note)) row.note = 'V.Ships 檢查意見：' + sm.comments;
-            if (ex && !ex.date_from && sm.date) row.date_from = sm.date;
-            await api('saveVisit', row);
-            const r = await api('importVisitItems', { visit_no: j.visitNo, items: j.parse.defects.map(d => d.due_date || !defDue ? d : Object.assign({}, d, { due_date: defDue })), update_existing: true });
-            if (upl && j.upErr) throw new Error(j.upErr + '。可取消勾選「PDF 歸檔到 Drive」只匯入缺失');
-            const ub = j.up ? j.up.blob : j.file;
-            if (upl) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: j.file.name, mime: 'application/pdf', size: ub.size, base64: await fileB64(ub), note: (j.parse.format === 'BSM' ? `BSM ${j.parse.defects.length} ${j.parse.mode === 'body' ? 'findings from answers (no deficiency appendix)' : 'deficiencies'} / ${sm.tasks} questions` : j.parse.format === 'SHIPSURE' ? `V.Ships Shipsure ${j.parse.defects.length} findings（${Object.entries(sm.byType || {}).map(([k, v]) => k + ' ' + v).join('、')}）・cleared ${sm.cleared}` : `VIR ${sm.defects ?? '?'} defects / ${sm.tasks ?? '?'} tasks・score ${sm.score || '—'}・${sm.status || ''}`) + (j.up ? shrinkNote(j.up) : '') });
-            out.push(`${j.visitNo}：新增 ${r.added.length}${r.skipped ? '、已有 ' + r.skipped : ''}${r.updated && r.updated.length ? '（補齊 ' + r.updated.length + '）' : ''}`);
+            out.push(await importVirJob(j, { upd, upl, defDue }));
+            const ex0 = M.visits.find(v => v.visit_no === j.visitNo); if (ex0 && ex0.src_file_id) await api('setVisitSync', { visit_no: j.visitNo, status: PSC.SYNC.DONE, note: '人工確認後匯入（' + j.file.name + '）' });
           }
           await close(); await reload();
           const last = jobs.filter(j => j.parse.defects.length).pop(); if (last) { S.visitNo = last.visitNo; setTab('visits'); }
@@ -3206,7 +3287,7 @@ async function reload() {
 async function start() {
   hideChrome(false);
   $('#view').innerHTML = '<div class="empty">載入資料中…</div>';
-  try { await reload(); }
+  try { await reload(); setTimeout(() => autoVirSync(false), 300); }
   catch (e) { if (CFG.demo) { $('#view').innerHTML = `<div class="card err">${esc(e.message)}</div>`; } else showLogin(e.message); }
 }
 
@@ -3246,5 +3327,5 @@ if (CFG.demo) {
   if (tok && p.exp && Date.now() / 1000 < p.exp - 60) { Object.assign(Auth, { token: tok, email: p.email, name: p.name, exp: p.exp }); start(); }
   else showLogin();
 }
-window.__PSCAPP = { get M() { return M; }, S, api, reload };
+window.__PSCAPP = { get M() { return M; }, S, api, reload, autoVirSync, VSYNC };
 })();

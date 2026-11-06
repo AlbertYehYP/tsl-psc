@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.16.0';
+  var VERSION = '1.17.0';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -299,7 +299,8 @@ var PSC = (function () {
     Settings: ['key', 'value', 'note'],
     Templates: ['code', 'stage', 'name', 'subject', 'body', 'sort', 'active', 'note'],
     Visits: ['visit_no', 'vessel', 'imo', 'company', 'party', 'vtype', 'date_from', 'date_to', 'port', 'inspector', 'report_date', 'score', 'reported_defects', 'report_url', 'pic', 'note',
-      'created_by', 'created_at', 'updated_by', 'updated_at', 'reported_breakdown', 'tasks', 'report_status'],
+      'created_by', 'created_at', 'updated_by', 'updated_at', 'reported_breakdown', 'tasks', 'report_status',
+      'src', 'src_file_id', 'src_file_name', 'src_file_at', 'sync_status', 'sync_note', 'sync_at'],
     VisitItems: ['item_id', 'visit_no', 'seq', 'ref', 'area', 'section', 'finding', 'action_required', 'due_date', 'risk', 'status', 'corrective_action', 'submitted_at', 'closed_at', 'closed_by',
       'verify_note', 'history', 'created_at', 'updated_by', 'updated_at', 'question', 'pms_code', 'psc_code', 'viq_code', 'score', 'ftype'],
     PortPSC: ['rec_id', 'source', 'mou', 'country', 'port', 'date', 'vessel', 'imo', 'flag', 'ship_type', 'ro', 'detained', 'def_count', 'codes', 'deficiencies', 'company', 'batch', 'imported_by', 'imported_at', 'note'],
@@ -383,6 +384,10 @@ var PSC = (function () {
     { key: 'google_client_id', value: '', note: 'Google 登入用 OAuth Client ID（與前端 config.js 相同）' },
     { key: 'drive_root_folder_id', value: '', note: '歸檔根資料夾 ID；空白時系統自動建立「TSL PSC System」' },
     { key: 'bribe_roles', value: 'admin,editor', note: '可以查看與登錄 Bribe（索賄）資料的角色' },
+    { key: 'register_sheet_id', value: '', note: '登輪審查系統的試算表（貼網址或 ID 皆可；不確定時可貼兩個，用逗號隔開，系統自動找有 REGISTER 分頁的那一個）。留空＝不自動收件' },
+    { key: 'register_sync_from', value: '2026-11-06', note: '自動收件起始日：登輪系統在這一天以後上傳的報告檔才自動建檔' },
+    { key: 'register_sync_parties', value: 'MGR', note: '自動收件的申請方（MGR 船管、OWN 船東；逗號分隔）' },
+    { key: 'register_sync_types', value: 'VIR', note: '自動收件的訪船類別（VIR 全船檢查；VST、ISA 報告格式不一，不建議自動判讀）' },
     { key: 'teu_bands', value: '0-2000, 2000-4000, 4000-6000, 7000-', note: '比較趨勢「船型區間」的 TEU 區間（逗號分隔；最後一段寫「7000-」表示以上）。落在區間之間的船自成一組，例 6000–7000' },
     { key: 'mou_watch_months', value: '2,5,8,11', note: 'MOU 年報自動檢查的月份（每月 15 日前後執行；Tokyo MOU 約 5 月、Paris MOU 約 7 月發布）' },
     { key: 'mou_watch_last', value: '', note: '最近一次自動檢查（UTC，系統寫入）' },
@@ -1411,6 +1416,63 @@ var PSC = (function () {
     audit(store, user, old ? 'update_visit' : 'create_visit', no, row);
     return row;
   }
+  /* ---------------- 登輪審查系統報告自動收件：登錄簿 Completed 的報告 → 訪船紀錄＋待建檔清單 ---------------- */
+  var SYNC = { PENDING: '待建檔', BUSY: '處理中', DONE: '已建檔', REVIEW: '待確認', SKIP: '已略過' };
+  /**
+   * p.rows：登輪系統登錄簿已完成、附報告的列（Code.gs 讀取並補上 Drive 檔案資訊）：
+   *   { reference, vessel, imo, party, type, boarding, landing, port, attended_by, file_id, file_name, file_url, file_created, file_updated, mime }
+   * 新的報告（檔案建立日 ≥ register_sync_from）→ 沒有訪船紀錄就建立，標「待建檔」；同一份檔案不重複處理；報告重傳（檔案換了）→ 再標「待建檔」，以合併方式更新。
+   * 回傳 { queue: 需要瀏覽器判讀的訪船編號, created, requeued, skipped, errors }
+   */
+  function registerIntake(store, user, p) {
+    need(user, 'editor');
+    var set = settingsMap(store), from = isoDate(p.from || set.register_sync_from) || '2026-11-06', now = store.now(), out = { queue: [], created: [], requeued: [], skipped: 0, errors: [] };
+    var parties = nameList(set.register_sync_parties || 'MGR').map(up), types = nameList(set.register_sync_types || 'VIR').map(up);
+    (p.rows || []).forEach(function (r) {
+      var no = up(r.reference).replace(/\s+/g, '-');
+      if (!no || !s(r.file_id)) { out.skipped++; return; }
+      var pv = parseVisitNo(no) || {}, party = up(r.party || pv.party), type = up(r.type || pv.vtype);
+      if (parties.indexOf(party) < 0 || types.indexOf(type) < 0) { out.skipped++; return; }
+      if (!/pdf/i.test(s(r.mime) || s(r.file_name))) { out.skipped++; return; }
+      var created = isoDate(r.file_created) || isoDate(r.file_updated);
+      if (!created || created < from) { out.skipped++; return; }
+      var v = store.all('Visits').filter(function (x) { return up(x.visit_no) === no; })[0];
+      var src = { src: 'REGISTER', src_file_id: s(r.file_id), src_file_name: s(r.file_name), src_file_at: s(r.file_updated || r.file_created), sync_status: SYNC.PENDING, sync_note: '', sync_at: now };
+      if (!v) {
+        try {
+          saveVisit(store, user, { visit_no: no, is_new: true, imo: s(r.imo), vessel: s(r.vessel), party: party, vtype: type, date_from: isoDate(r.boarding), date_to: isoDate(r.landing) || isoDate(r.boarding), port: s(r.port), inspector: s(r.attended_by), report_url: s(r.file_url), note: '登輪系統自動收件' });
+          store.update('Visits', 'visit_no', no, Object.assign(src, { sync_note: '登輪系統自動收件，待判讀報告' }));
+          out.created.push(no); out.queue.push(no);
+        } catch (e) { out.errors.push(no + '：' + (e && e.message || e)); }
+        return;
+      }
+      if (s(v.src_file_id) === s(r.file_id) && s(v.src_file_at) === src.src_file_at) {
+        if (s(v.sync_status) === SYNC.PENDING || (s(v.sync_status) === SYNC.BUSY && minutesSince(v.sync_at, now) > 15)) out.queue.push(v.visit_no);
+        return;
+      }
+      // 新檔或報告重傳：重新判讀，以合併方式更新（已登錄的缺失不重複建立）
+      var patch = Object.assign(src, { report_url: s(r.file_url) || s(v.report_url), sync_note: s(v.src_file_id) ? '登輪系統的報告檔已更新（' + s(r.file_name) + '），待重新判讀' : '登輪系統收到報告，待判讀' });
+      store.update('Visits', 'visit_no', v.visit_no, patch);
+      audit(store, user, 'register_intake', v.visit_no, patch.sync_note);
+      out.requeued.push(v.visit_no); out.queue.push(v.visit_no);
+    });
+    if (out.created.length) audit(store, user, 'register_intake', out.created.join(','), '自動建立訪船紀錄 ' + out.created.length + ' 筆');
+    return out;
+  }
+  function minutesSince(a, b) { var x = Date.parse(s(a)), y = Date.parse(s(b)); return isNaN(x) || isNaN(y) ? 1e9 : (y - x) / 60000; }
+  /** 更新自動建檔狀態：處理中／已建檔／待確認／已略過（略過要原因） */
+  function setVisitSync(store, user, p) {
+    need(user, 'editor');
+    var no = up(p.visit_no), v = store.all('Visits').filter(function (x) { return up(x.visit_no) === no; })[0];
+    if (!v) throw new Error('找不到訪船紀錄 ' + no);
+    var st = s(p.status); if ([SYNC.PENDING, SYNC.BUSY, SYNC.DONE, SYNC.REVIEW, SYNC.SKIP].indexOf(st) < 0) throw new Error('狀態不正確：' + st);
+    if (st === SYNC.SKIP && !s(p.note)) throw new Error('請填寫略過原因');
+    var patch = { sync_status: st, sync_note: s(p.note), sync_at: store.now() };
+    store.update('Visits', 'visit_no', v.visit_no, patch);
+    if (st !== SYNC.BUSY) audit(store, user, 'visit_sync', v.visit_no, st + (s(p.note) ? '｜' + s(p.note) : ''));
+    return Object.assign({}, v, patch);
+  }
+
   function clearedNote(it, cl) { return '報告記錄已於 ' + cl + ' 清除' + (s(it.cleared_by) ? '（' + s(it.cleared_by) + '）' : '') + (s(it.action_note) ? '：' + s(it.action_note) : '') + '。'; }
   function importVisitItems(store, user, p) {
     need(user, 'editor');
@@ -2606,6 +2668,8 @@ var PSC = (function () {
       case 'saveVessel': return adminSave(store, user, 'Vessels', 'imo', payload);
       case 'saveSetting': return adminSave(store, user, 'Settings', 'key', payload);
       case 'saveVisit': return store.lock(function () { return saveVisit(store, user, payload); });
+      case 'registerIntake': return store.lock(function () { return registerIntake(store, user, payload); });
+      case 'setVisitSync': return store.lock(function () { return setVisitSync(store, user, payload); });
       case 'importVisitItems': return store.lock(function () { return importVisitItems(store, user, payload); });
       case 'saveVisitItem': return store.lock(function () { return saveVisitItem(store, user, payload); });
       case 'importPortPsc': return store.lock(function () { return importPortPsc(store, user, payload); });
@@ -2640,7 +2704,7 @@ var PSC = (function () {
     deadlines: deadlines, pscTier: pscTier, vesselAt: vesselAt, handle: handle,
     BRIBE_FIELDS: BRIBE_FIELDS, parseBribe: parseBribe, bribeFlag: bribeFlag, canBribe: canBribe, num: num,
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
-    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, evidenceDocs: evidenceDocs, UPD_STAGES: UPD_STAGES, UPD_CHANNELS: UPD_CHANNELS, DOC_DELETED: DOC_DELETED, utcMinute: utcMinute, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
+    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, SYNC: SYNC, evidenceDocs: evidenceDocs, UPD_STAGES: UPD_STAGES, UPD_CHANNELS: UPD_CHANNELS, DOC_DELETED: DOC_DELETED, utcMinute: utcMinute, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
     TOKYO: TOKYO, TAIWAN_PSC: TAIWAN_PSC, TW_PORTS: TW_PORTS, twPort: twPort, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
     incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
     DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,
