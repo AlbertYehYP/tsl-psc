@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.17.0';
+  var VERSION = '1.17.1';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {

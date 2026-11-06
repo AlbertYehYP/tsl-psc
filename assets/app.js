@@ -14,7 +14,7 @@ const TAB_LIST = Object.values(SECTIONS).flatMap(x => x.tabs.map(t => t[0]));
 const secOf = t => Object.keys(SECTIONS).find(k => SECTIONS[k].tabs.some(x => x[0] === t)) || 'psc';
 const MAX_MB = 20;
 /** 前端程式版本（與 core.js 的 PSC.VERSION、後端 core.gs 必須一致） */
-const APP_VERSION = '1.17.0';
+const APP_VERSION = '1.17.1';
 /** 版本不一致警示：顯示在頁首下方，避免瀏覽器快取舊檔或漏更新某個檔案時沒人發現 */
 function versionBanner(kind, html) {
   let el = document.getElementById('ver-bar');
@@ -2886,6 +2886,10 @@ function vAdmin(v) {
   <div class="frow">${[['tmou_white_flags', '船旗 High 名單（LRS 條件）'], ['tmou_black_flags', '船旗 Low 名單（HRS +1）'], ['tmou_ro_high', 'RO High 名單（LRS 條件）'], ['tmou_ro_low', 'RO Low 名單（HRS +1）']].map(([k, l]) => `<div class="field"><label for="tm-${k}">${l}</label><textarea class="inp" rows="3" id="tm-${k}" data-tm="${k}">${esc(set[k] || '')}</textarea></div>`).join('')}</div>
   <div class="field"><label for="tm-docs">高績效公司名單（ISM DOC 公司 IMO）</label><textarea class="inp mono" rows="2" id="tm-docs" data-tm="tmou_high_perf_docs">${esc(set.tmou_high_perf_docs || '')}</textarea><span class="hint">從「List of high performing companies」PDF 複製公司 IMO 即可，系統只看 7 位數字</span></div>
   <div class="btnrow"><button class="btn primary" type="button" id="tm-save">儲存</button></div></div></div>
+  <div class="card" style="margin-bottom:16px" id="rg-card"><div class="section-head"><div><h2>登輪系統自動收件</h2><p class="sub" style="margin:2px 0 0">登輪審查系統收到的訪船報告自動轉入訪船缺失：讀登輪試算表的 REGISTER 分頁，狀態 Completed、符合下列申請方與類別、報告 PDF 在起始日以後上傳的案件。兩個系統要用同一個 Google 帳號部署。</p></div></div>
+  <div class="form"><div class="field"><label for="rg-sheet">登輪系統試算表網址</label><textarea class="inp mono" rows="2" id="rg-sheet" placeholder="https://docs.google.com/spreadsheets/d/…/edit">${esc(set.register_sheet_id || '')}</textarea><span class="hint">貼網址或 ID 都可以；不確定是哪一個就兩個都貼，用逗號隔開，系統自動用有 REGISTER 分頁的那一個。留空＝不自動收件</span></div>
+  <div class="frow"><div class="field"><label for="rg-from">起始日</label><input class="inp" type="date" id="rg-from" value="${esc(PSC.isoDate(set.register_sync_from) || '2026-11-06')}"><span class="hint">這一天以後上傳的報告才自動建檔</span></div><div class="field"><label for="rg-party">申請方</label><input class="inp" id="rg-party" value="${esc(set.register_sync_parties || 'MGR')}"><span class="hint">MGR 船管；逗號分隔</span></div><div class="field"><label for="rg-type">訪船類別</label><input class="inp" id="rg-type" value="${esc(set.register_sync_types || 'VIR')}"><span class="hint">VIR 全船檢查；逗號分隔</span></div></div>
+  <div class="btnrow"><button class="btn primary" type="button" id="rg-save">儲存</button><button class="btn" type="button" id="rg-test">儲存並立即檢查</button><span class="dim" id="rg-info" style="font-size:12.5px">${VSYNC.at ? `上次檢查 ${esc(VSYNC.at)} UTC：${esc(VSYNC.msg || '')}` : ''}</span></div><div id="rg-err" class="err">${VSYNC.errors.length ? VSYNC.errors.map(esc).join('<br>') : ''}</div></div></div>
   <div class="grid g2" style="margin-bottom:16px"><div class="card"><div class="section-head"><h2>資料檢核</h2><button class="btn" type="button" id="dc-run">執行檢核</button></div><p class="sub">組員直接編輯 Google 試算表後，用這裡檢查編號重複、找不到對應、格式錯誤等問題。試算表選單「TSL PSC → 檢核資料」結果相同。</p><div id="dc-out"></div></div>
   <div class="card"><h2>匯入船舶主檔 / NK 資料</h2><p class="sub">選擇船隊監控系統的 <span class="mono">fleet-data.js</span>（整個船隊一次匯入），或貼上 SHIP JSON。依 IMO 對應，更新船級、GT / DWT、TEU、登記船東等欄位與 NK 檢驗 / 證書到期。</p><div class="form"><input class="inp" type="file" id="nk-file" accept=".js,.json,application/json,text/javascript"><textarea class="inp mono" id="nk-text" rows="3" placeholder='{"vessel_master": {"imo_number": "9967512", ...}, "certificates": [...], "surveys": [...]}'></textarea><div class="field"><label for="nk-mode">寫入方式</label><select id="nk-mode"><option value="class">船級欄位以 Class 資料為準，其餘只補空白（建議）</option><option value="fill">只補空白欄位，不同值列出來確認</option><option value="overwrite">全部以主檔覆蓋</option></select></div><div class="btnrow"><button class="btn primary" type="button" id="nk-go">匯入</button><span class="dim" id="nk-info" style="font-size:12.5px"></span></div></div>
   <h2 style="margin-top:14px">管理公司（Tokyo MOU 績效）</h2><div class="tbl-wrap"><table><thead><tr><th>公司碼</th><th>名稱</th><th>DOC 公司 IMO</th><th>績效</th><th>日期</th><th>回信稱謂 / 收件人</th></tr></thead><tbody>${M.companies.map(c => `<tr class="click" data-co="${esc(c.code)}" title="${esc(c.note || '')}"><td class="mono">${esc(c.code)}</td><td>${esc(c.name)}</td><td class="mono">${esc(c.doc_imo)}</td><td>${esc(c.tmou_performance)}</td><td class="num">${dfmt(c.perf_as_of)}</td><td style="font-size:12px">${c.greeting || c.email_to ? `${esc(c.greeting || '')}<div class="dim">${esc(c.email_to || '')}</div>` : '<span class="dim">點一下設定</span>'}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">尚未匯入</td></tr>'}</tbody></table></div></div></div>
@@ -2940,6 +2944,20 @@ function vAdmin(v) {
     }
     await reload(); toast('設定已儲存');
   }, $('#s-save')));
+  const rgSave = async () => {
+    const d = k => (PSC.DEFAULT_SETTINGS.find(x => x.key === k) || {}).note || '';
+    const sheet = $('#rg-sheet').value.trim(), from = $('#rg-from').value;
+    if (sheet && !/[-\w]{25,}/.test(sheet)) throw new Error('看不出試算表 ID，請貼完整的 Google 試算表網址');
+    if (!from) throw new Error('請填起始日');
+    const rows = [['register_sheet_id', sheet], ['register_sync_from', from], ['register_sync_parties', $('#rg-party').value.trim().toUpperCase() || 'MGR'], ['register_sync_types', $('#rg-type').value.trim().toUpperCase() || 'VIR']].map(([key, value]) => ({ key, value, note: d(key) }));
+    await api('saveSettings', { rows }); await reload();
+  };
+  $('#rg-save').addEventListener('click', () => run(async () => { await rgSave(); toast('已儲存登輪系統自動收件設定'); }, $('#rg-save')));
+  $('#rg-test').addEventListener('click', () => run(async () => {
+    await rgSave(); await autoVirSync(true);
+    if (VSYNC.enabled === false) toast('沒有設定登輪系統試算表，自動收件未啟用'); else if (VSYNC.errors.length) toast('檢查完成，但有問題，請看下方說明', 8000);
+    if (document.getElementById('rg-card')) render();
+  }, $('#rg-test')));
   $('#v-new').addEventListener('click', () => { S.adm.vessel = { company: 'FLEET' }; render(); });
   $('#m-new').addEventListener('click', () => { S.adm.mou = { mou: PSC.TOKYO }; render(); });
   v.querySelectorAll('[data-port]').forEach(b => b.addEventListener('click', () => editPort(b.dataset.port)));
