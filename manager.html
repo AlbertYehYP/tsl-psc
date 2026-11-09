@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>TSL 船管事故通報入口 Ship Manager Portal</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="assets/app.css?v=1.18.0">
+<link rel="stylesheet" href="assets/manager.css?v=1.18.0">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+<script>try{var t=localStorage.getItem("tsl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<!--MGR-->
+<div class="wrap mg" id="mg">
+  <header class="mast">
+    <div>
+      <div class="eyebrow">T.S. Lines · Marine Technical Department (MARTEC)</div>
+      <h1>船管事故通報入口 <span class="en">Ship Manager Incident Portal</span></h1>
+    </div>
+    <div class="mast-right"><div class="mg-who" id="mg-who"></div></div>
+  </header>
+  <div id="mg-demo" class="mg-demo" hidden></div>
+  <main id="mg-view"><p class="dim" style="padding:40px 0;text-align:center">載入中 Loading…</p></main>
+  <footer class="mg-foot">
+    <p>所有時間均為 UTC；上傳時間即為德翔收到時間，計入通報時限。<br><span class="en">All times are UTC. The upload time is recorded as the time T.S. Lines received your report and counts toward the reporting time limits.</span></p>
+  </footer>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script src="config.js"></script>
+<script src="assets/manager.js?v=1.18.0"></script>
+<!--/MGR-->
+</body>
+</html>

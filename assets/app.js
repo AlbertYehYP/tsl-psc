@@ -14,7 +14,7 @@ const TAB_LIST = Object.values(SECTIONS).flatMap(x => x.tabs.map(t => t[0]));
 const secOf = t => Object.keys(SECTIONS).find(k => SECTIONS[k].tabs.some(x => x[0] === t)) || 'psc';
 const MAX_MB = 20;
 /** 前端程式版本（與 core.js 的 PSC.VERSION、後端 core.gs 必須一致） */
-const APP_VERSION = '1.17.3';
+const APP_VERSION = '1.18.0';
 /** 版本不一致警示：顯示在頁首下方，避免瀏覽器快取舊檔或漏更新某個檔案時沒人發現 */
 function versionBanner(kind, html) {
   let el = document.getElementById('ver-bar');
@@ -117,12 +117,26 @@ const Demo = {
 
 /* ---------- API / auth ---------- */
 const Auth = { token: null, email: '', name: '', exp: 0 };
+/** 示範模式的船管存取碼（只在這個瀏覽器的記憶體） */
+const DemoMgr = {};
+function demoMgrCode(action, p) {
+  if (!can('admin')) throw new Error('權限不足：船管存取碼只有 admin 可以管理');
+  const cos = Array.from(new Set(M.companies.map(c => c.code).concat(M.vessels.map(v => v.company)).map(c => String(c || '').toUpperCase()))).filter(c => c && !['TSL', 'TEH'].includes(c)).sort();
+  const nm = c => (PSC.CO_EN && PSC.CO_EN[c]) || c;
+  if (action === 'mgrCodeList') return cos.map(c => ({ company: c, name: nm(c), set: !!DemoMgr[c], at: (DemoMgr[c] || {}).at || '', by: (DemoMgr[c] || {}).by || '', open: M.incidents.filter(x => String(x.company).toUpperCase() === c && x.status === ST.OPEN).length }));
+  const c = String(p.company || '').toUpperCase();
+  if (action === 'mgrCodeOff') { delete DemoMgr[c]; return { company: c, set: false }; }
+  const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let k = ''; for (let i = 0; i < 8; i++) k += A[Math.floor(Math.random() * A.length)];
+  const at = new Date().toISOString().slice(0, 16).replace('T', ' '); DemoMgr[c] = { at, by: Auth.email || 'demo' };
+  return { company: c, name: nm(c), code: k.slice(0, 4) + '-' + k.slice(4), at };
+}
 async function api(action, payload, opt) {
   if (CFG.demo && action === 'fetchUrl') throw new Error('示範模式不連線外部網站；請改用「匯入檢查／留置紀錄」上傳檔案或貼上表格');
   if (CFG.demo && window.__PSCAPP && typeof window.__PSCAPP.mock === 'function') { const mr = await window.__PSCAPP.mock(action, payload); if (mr !== undefined) return mr; }  // 示範版測試用：模擬登輪系統
   if (CFG.demo && action === 'registerSync') return { enabled: false, queue: [], created: [], requeued: [], errors: [] };
   if (CFG.demo && action === 'registerPdf') throw new Error('示範模式不連線登輪系統');
   if (CFG.demo && (action === 'mouWatchNow' || action === 'mouPdf')) throw new Error('示範模式不連線外部網站；正式版由後端每季自動檢查 Tokyo MOU、Paris MOU 官網的年報');
+  if (CFG.demo && /^mgrCode/.test(action)) return demoMgrCode(action, payload || {});
   if (CFG.demo) return Demo.call(action, payload || {});
   if (!Auth.token || Date.now() / 1000 > Auth.exp - 30) { showLogin('登入已過期，請重新登入'); throw new Error('登入已過期，請重新登入'); }
   if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]{20,}\/exec$/.test(String(CFG.apiUrl).trim())) throw new Error('config.js 的 apiUrl 不是 Apps Script 部署網址（應為 https://script.google.com/macros/s/……/exec，請整串貼上「管理部署作業」裡的網址）');
@@ -1405,6 +1419,7 @@ function vHome(v) {
   const byVisit = {}; vOver.forEach(it => { const k = it.visit_no; (byVisit[k] = byVisit[k] || []).push(it); });
   Object.entries(byVisit).forEach(([k, its]) => { const first = its.map(i => i.due_date).sort()[0]; att.push({ lv: 2, area: '訪船', d: first, t: `${its.length} 項缺失逾期未改善（最早期限 ${dfmt(first)}）`, what: `${(its[0].v && its[0].v.vessel) || ''}・${k}`, go: { visit: k } }); });
   soon.forEach(r => att.push({ lv: 1, area: 'PSC', d: r.from || '', t: `${r.days_to_open} 天後進入 Tokyo MOU 窗口`, what: r.vessel, go: { tab: 'window' } }));
+  open.forEach(x => { const nu = (x.updates || []).filter(isMgrNew); if (nu.length) att.push({ lv: 2, area: '事故', d: nu[nu.length - 1].received_at.slice(0, 10), t: `船管上傳 ${nu.length} 筆更新待閱（${nu.map(u => UPD_NAME[u.stage] || u.stage).filter((q, i, a) => a.indexOf(q) === i).join('、')}）`, what: `${x.vessel}・${x.tracking_no}`, go: { inc: x.tracking_no, upd: 1 } }); });
   att.sort((a, b) => b.lv - a.lv || ((a.d || '9') < (b.d || '9') ? -1 : (a.d || '9') > (b.d || '9') ? 1 : 0));
   // 船舶關注排行
   const winBy = Object.fromEntries(win.map(r => [String(r.imo), r]));
@@ -1426,6 +1441,7 @@ function vHome(v) {
     <div class="card hm-col" id="hm-vf"><div class="section-head"><h2>訪船缺失</h2><button class="btn sm ghost" type="button" data-hgo="vf-overview">訪船總覽 →</button></div>
       <div class="kpis hm-kpis">${kpi('未關閉缺失', vs.open + vs.submitted, `待改善 ${vs.open}・待確認 ${vs.submitted}`, '', 'vf-items')}${kpi('逾期未改善', vs.overdue, `14 天內到期 ${vs.dueSoon}`, vs.overdue ? 'crit' : '', 'vf-items')}${kpi('近 3 個月訪船', vis90.length, `全部 ${M.visits.length} 次`, '', 'visits')}${kpi('如期改善率', vs.ontime + vs.late ? Math.round(vs.ontime / (vs.ontime + vs.late) * 100) + '%' : '—', `如期 ${vs.ontime}・逾期 ${vs.late}`, '', 'vf-overview')}</div></div>
   </div>
+  ${homeUpdHTML(open, td)}
   <div class="card" style="margin:16px 0" id="hm-trend"><div class="section-head"><div><h2>每月動態（近 12 個月）</h2><p class="sub" style="margin:2px 0 0">每月新增事故、PSC 檢查、訪船次數。</p></div></div><div class="cmp-chart" id="hm-chart"></div></div>
   <div class="grid g2" style="gap:16px;align-items:start">
     <div class="card" id="hm-att"><div class="section-head"><div><h2>需要處理（${att.length}）</h2><p class="sub" style="margin:2px 0 0">逾期與窗口優先，依急迫度排列；點一下開啟。</p></div></div>
@@ -1434,13 +1450,83 @@ function vHome(v) {
       ${ships.length ? `<div class="tbl-wrap"><table class="rp-t"><thead><tr><th>船舶</th><th>事故風險</th><th>PSC</th><th>窗口</th><th class="n">未結事故</th><th class="n">逾期缺失</th></tr></thead><tbody>${ships.map(o => `<tr class="click" data-hship="${esc(o.k)}"><td><b>${esc(o.sh.vessel)}</b><div class="dim" style="font-size:11.5px">${esc(coLabel(o.sh.company))}${o.dt ? `・<span class="flag">留置 ${o.dt}</span>` : ''}</div></td><td>${irkPill(o.r.level)}</td><td>${o.p.n ? perfPill(o.p.performance) : '<span class="dim">—</span>'}</td><td style="font-size:12px">${o.w && o.w.priority ? `<b class="flag">Priority ${o.w.priority}</b>` : o.w && o.w.opening_soon ? '即將進入' : '<span class="dim">—</span>'}</td><td class="n">${o.io || '·'}</td><td class="n">${o.vo ? `<b class="flag">${o.vo}</b>` : '·'}</td></tr>`).join('')}</tbody></table></div><p class="note">點船名開啟船舶履歷（可再產生單船綜合報告）。</p>` : '<div class="empty">沒有需要特別關注的船舶</div>'}</div>
   </div>`;
   v.querySelectorAll('[data-hgo]').forEach(b => b.addEventListener('click', () => { clearDetail(); setTab(b.dataset.hgo); window.scrollTo({ top: 0 }); }));
-  v.querySelectorAll('[data-hatt]').forEach(b => b.addEventListener('click', () => { const g = att[+b.dataset.hatt].go; clearDetail(); if (g.inc) openIncident(g.inc); else if (g.visit) openVisit(g.visit); else { setTab(g.tab); window.scrollTo({ top: 0 }); } }));
+  wireHomeUpd(v);
+  v.querySelectorAll('[data-hatt]').forEach(b => b.addEventListener('click', () => { const g = att[+b.dataset.hatt].go; clearDetail(); if (g.inc) { openIncident(g.inc); if (g.upd) setTimeout(() => { const el = document.getElementById('inc-upd'); if (el) el.scrollIntoView({ block: 'start' }); }, 60); } else if (g.visit) openVisit(g.visit); else { setTab(g.tab); window.scrollTo({ top: 0 }); } }));
   v.querySelectorAll('[data-hship]').forEach(tr => tr.addEventListener('click', () => { clearDetail(); S.histShip = tr.dataset.hship; setTab('vf-ships'); window.scrollTo({ top: 0 }); }));
   // 每月動態
   const months = []; for (let i = 11; i >= 0; i--) months.push(monthsAgo(i, td).slice(0, 7));
   const cnt = (arr, f) => months.map(m => ({ label: m, d: m + '-15', v: arr.filter(x => String(f(x) || '').slice(0, 7) === m).length }));
   multiLineChart($('#hm-chart'), { series: [{ name: '事故', color: CMP_COLORS[1], points: cnt(inc, x => x.date) }, { name: 'PSC 檢查', color: CMP_COLORS[0], points: cnt(M.insp, I => I.date) }, { name: '訪船', color: CMP_COLORS[2], points: cnt(M.visits, x => x.date_from || x.report_date) }],
     fmt: x => String(Math.round(x)), tickFmt: dt => dt.getUTCMonth() === 0 ? String(dt.getUTCFullYear()) : (dt.getUTCMonth() + 1) + '月', aria: '每月事故、PSC 檢查、訪船次數' });
+}
+/* ---------- 系統管理：船管公司存取碼（v1.18）。原碼只在產生時顯示一次 ---------- */
+function mgrPortalUrl() { const base = String(M.settings.site_url || '').trim().replace(/\/+$/, ''); return (/^https:\/\//.test(base) && !CFG.demo ? base : location.origin + location.pathname.replace(/[^/]*$/, '').replace(/\/$/, '')) + '/manager.html'; }
+async function wireMgrCodes() {
+  const box = $('#mc-list'); if (!box) return;
+  $('#mc-copy').addEventListener('click', () => copyText($('#mc-url').value, '已複製船管入口網址'));
+  let list;
+  try { list = await api('mgrCodeList', {}); } catch (e) { box.innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  if (!document.body.contains(box)) return;
+  box.innerHTML = `<div class="tbl-wrap"><table><thead><tr><th>船管公司</th><th class="n">進行中事故</th><th>存取碼</th><th></th></tr></thead><tbody>${list.map(c => `<tr><td><b>${esc(c.name)}</b> <span class="dim mono">${esc(c.company)}</span></td><td class="n num">${c.open}</td>
+    <td>${c.set ? `<span class="stp stp-closed">已啟用</span> <span class="dim" style="font-size:12px">${esc(c.at)} UTC・${esc(c.by)}</span>` : '<span class="stp stp-nil">未設定</span>'}</td>
+    <td style="white-space:nowrap;text-align:right"><button class="btn sm" type="button" data-mcnew="${esc(c.company)}">${c.set ? '換新代碼' : '產生代碼'}</button>${c.set ? `<button class="btn sm ghost danger-t" type="button" data-mcoff="${esc(c.company)}">停用</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
+    <p class="note">自管船（TSL、TEH）不列入。船管上傳後系統寄信給該船 PIC（Vessels 的 pic_email）；要另外通知的人填在 Settings 的 mgr_notify_cc。</p>`;
+  box.querySelectorAll('[data-mcnew]').forEach(b => b.addEventListener('click', () => {
+    const c = list.find(q => q.company === b.dataset.mcnew);
+    openModal({ title: (c.set ? '換新存取碼：' : '產生存取碼：') + c.name, html: `<div class="form"><p>${c.set ? '換新後<b>舊存取碼立即失效</b>，已登入的船管會被登出，需要用新碼重新登入。' : '產生後這家船管就能用存取碼登入船管入口。'}</p><p>存取碼只會顯示這一次，請記下後<b>口頭或另行告知</b>船管公司窗口，不要寫在 email、通告或文件裡。</p></div>`,
+      foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="mc-go">${c.set ? '換新代碼' : '產生代碼'}</button>`,
+      onMount(root, close) { const q = k => root.querySelector(k); q('[data-close]').addEventListener('click', close);
+        q('#mc-go').addEventListener('click', () => run(async () => { const r = await api('mgrCodeNew', { company: c.company }); await close(); showMgrCode(r); }, q('#mc-go'))); } });
+  }));
+  box.querySelectorAll('[data-mcoff]').forEach(b => b.addEventListener('click', () => {
+    const c = list.find(q => q.company === b.dataset.mcoff);
+    openModal({ title: '停用存取碼：' + c.name, html: '<p>停用後這家船管無法登入船管入口，已登入的連線立即失效。已上傳的紀錄不受影響。之後可再產生新代碼。</p>',
+      foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn danger" type="button" id="mc-off">停用</button>`,
+      onMount(root, close) { root.querySelector('[data-close]').addEventListener('click', close);
+        root.querySelector('#mc-off').addEventListener('click', () => run(async () => { await api('mgrCodeOff', { company: c.company }); await close(); toast('已停用 ' + c.name + ' 的存取碼'); wireMgrCodes(); }, root.querySelector('#mc-off'))); } });
+  }));
+}
+function showMgrCode(r) {
+  openModal({ title: r.name + ' 的船管入口存取碼', html: `<div class="form"><div class="mc-code mono" id="mc-code">${esc(r.code)}</div>
+    <p class="dim" style="text-align:center;margin:0">產生時間 ${esc(r.at)} UTC</p>
+    <div class="warnbox" style="background:var(--warn-soft);color:var(--warn-ink);border-radius:10px;padding:10px 12px;font-size:13px">這個代碼<b>只顯示這一次</b>，關閉後無法再查看（系統只存雜湊）。請口頭或用另行約定的方式告知 ${esc(r.name)} 窗口，不要用 email 寄送，也不要寫進文件。忘記時再產生新代碼即可。</div></div>`,
+    foot: `<button class="btn" type="button" id="mc-cp">複製代碼</button><button class="btn primary" type="button" data-close>我已記下，關閉</button>`,
+    onMount(root, close) { root.querySelector('[data-close]').addEventListener('click', async () => { await close(); wireMgrCodes(); }); root.querySelector('#mc-cp').addEventListener('click', () => copyText(r.code, '已複製存取碼（請勿貼到 email）')); } });
+}
+/* ---------- 綜合資訊：未結案事故的更新狀況（v1.18）。誰最後更新、下一階段期限、船管上傳待閱 ---------- */
+function incActivity(x) {
+  const ups = (x.updates || []).filter(u => u.ack_status !== '退回'), docs = (x.docs || []).filter(d => d.status !== PSC.DOC_DELETED);
+  const ev = ups.map(u => ({ at: u.received_at, kind: u.origin === PSC.MGR_ORIGIN ? 'mgr' : 'tsl', stage: UPD_NAME[u.stage] || u.stage, text: u.content, who: u.source }))
+    .concat(docs.filter(d => !d.upd_id).map(d => ({ at: PSC.utcMinute(d.uploaded_at), kind: 'doc', stage: d.doc_type, text: d.original_name || d.file_name, who: d.uploaded_by })))
+    .filter(e => e.at).sort((a, b) => a.at < b.at ? 1 : -1);
+  return ev[0] || null;
+}
+function homeUpdRows(open, td) {
+  return open.map(x => {
+    const last = incActivity(x), unread = (x.updates || []).filter(isMgrNew).length, nx = (x.timely || []).find(t => !t.at && t.state !== 'exempt');
+    const lastD = last ? last.at.slice(0, 10) : x.date, idle = Math.max(0, Math.round((Date.parse(td) - Date.parse(lastD)) / 864e5));
+    const over = (x.timely || []).some(t => t.state === 'overdue') || x.over;
+    return { x, last, unread, nx, idle, over, rej: (x.updates || []).some(u => u.ack_status === '退回') };
+  }).sort((a, b) => (b.unread > 0) - (a.unread > 0) || (b.over - a.over) || ((a.last ? a.last.at : a.x.date) < (b.last ? b.last.at : b.x.date) ? 1 : -1));
+}
+function homeUpdHTML(open, td) {
+  const rows = homeUpdRows(open, td), f = S.hmUpd || 'all';
+  const F = { all: ['全部', () => true], unread: ['船管待閱', r => r.unread > 0], over: ['有逾期', r => r.over], idle: ['7 天沒有更新', r => r.idle > 7] };
+  const all = rows.filter(F[f] ? F[f][1] : F.all[1]), lim = S.hmUpdAll ? all.length : 10, list = all.slice(0, lim);
+  const KIND = { mgr: '<span class="stp stp-open">船管上傳</span>', tsl: '<span class="stp stp-nil">海技登錄</span>', doc: '<span class="stp stp-nil">文件</span>' };
+  return `<div class="card" style="margin:16px 0" id="hm-upd"><div class="section-head"><div><h2>未結案事故更新狀況（${open.length}）</h2><p class="sub" style="margin:2px 0 0">每件進行中事故最近一次更新（船管入口上傳、海技登錄或歸檔文件）、下一個報告期限、船管上傳待閱筆數。待閱與逾期排在最前面；點一下開啟事故。</p></div>
+    <div class="seg" role="group" aria-label="篩選">${Object.entries(F).map(([k, [n, fn]]) => `<button type="button" aria-pressed="${k === f}" data-hmupd="${k}">${n}<span class="dim"> ${rows.filter(fn).length}</span></button>`).join('')}</div></div>
+    ${list.length ? `<div class="tbl-wrap"><table class="hm-upd"><thead><tr><th>事故</th><th>最近更新</th><th>下一階段</th><th class="n">船管待閱</th><th class="n">未更新</th></tr></thead><tbody>${list.map(r => { const x = r.x, l = r.last, nx = r.nx;
+      return `<tr class="click${r.unread ? ' hm-new' : ''}" data-hmupdinc="${esc(x.tracking_no)}"><td><b>${esc(x.vessel)}</b> ${tierPill(x.tier)}<div class="tn dim">${esc(x.tracking_no)}</div><div class="dim" style="font-size:12px">${esc(x.mgmt || x.company)}・PIC ${esc(x.pic || '—')}</div></td>
+        <td style="min-width:240px">${l ? `<div>${KIND[l.kind]} <span class="pill cat">${esc(l.stage)}</span> <span class="num dim">${esc(l.at)} UTC</span></div><div class="hm-snip">${esc(String(l.text || '').replace(/\s+/g, ' ').slice(0, 90))}${String(l.text || '').length > 90 ? '…' : ''}</div>` : '<span class="dim">尚無更新</span>'}${r.rej ? '<div class="flag" style="font-size:12px">有退回的船管更新</div>' : ''}</td>
+        <td style="white-space:nowrap">${nx ? `${esc(nx.label)}<div>${nx.state === 'untracked' ? '<span class="dim" style="font-size:12px">匯入，未追蹤</span>' : dueCell(nx.due, false, true)}</div>` : '<span style="color:var(--good)">✓ 三階段已收到</span>'}</td>
+        <td class="n">${r.unread ? `<span class="stp stp-miss">● ${r.unread}</span>` : '<span class="dim">—</span>'}</td>
+        <td class="n num${r.idle > 7 ? ' hm-idle' : ''}">${r.idle} 天</td></tr>`; }).join('')}</tbody></table></div>${all.length > 10 ? `<div class="btnrow" style="margin-top:8px"><button class="btn sm ghost" type="button" id="hm-upd-more">${S.hmUpdAll ? '只顯示前 10 件' : `顯示全部 ${all.length} 件`}</button></div>` : ''}` : '<div class="empty">沒有符合條件的事故</div>'}</div>`;
+}
+function wireHomeUpd(v) {
+  v.querySelectorAll('[data-hmupd]').forEach(b => b.addEventListener('click', () => { S.hmUpd = b.dataset.hmupd; const y = window.scrollY; render(); window.scrollTo({ top: y }); }));
+  const more = v.querySelector('#hm-upd-more'); if (more) more.addEventListener('click', () => { S.hmUpdAll = !S.hmUpdAll; const y = window.scrollY; render(); window.scrollTo({ top: y }); });
+  v.querySelectorAll('[data-hmupdinc]').forEach(tr => tr.addEventListener('click', () => { clearDetail(); openIncident(tr.dataset.hmupdinc); setTimeout(() => { const el = document.getElementById('inc-upd'); if (el) el.scrollIntoView({ block: 'start' }); }, 60); }));
 }
 /* ---------- 右側快速連結：依本頁各區塊標題產生，捲動時標示目前位置；窄螢幕改為「目錄」按鈕 ---------- */
 const QNav = { built: false, items: [], raf: 0, sig: '' };
@@ -2208,9 +2294,9 @@ function uploadHTML(base, psc) {
 const histHTML = h => h ? `<details class="hist"><summary>修改紀錄（${String(h).split('\n').length}）</summary><ol>${String(h).split('\n').map(l => `<li>${esc(l)}</li>`).join('')}</ol></details>` : '';
 function docListHTML(docs, psc, del) {
   const ed = can('editor'), groups = docTypesFor(psc).concat(PSC.DOC_TYPES.filter(t => !docTypesFor(psc).includes(t))).map(t => ({ t, docs: docs.filter(d => d.doc_type === t.code).sort((a, b) => +a.seq - +b.seq) })).filter(g => g.docs.length);
-  const row = (d, gone) => `<div class="doc${gone ? ' gone' : ''}"><div><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.file_name)}</a>${d.note ? ` <span class="dim">· ${esc(d.note)}</span>` : ''}<div class="dim" style="font-size:12px">原檔名 ${esc(d.original_name)}${d.updated_at && !gone ? `・最後修改 ${dfmt(d.updated_at)}` : ''}</div>
+  const row = (d, gone) => `<div class="doc${gone ? ' gone' : ''}"><div><a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.file_name)}</a>${d.origin === PSC.MGR_ORIGIN ? ' <span class="stp stp-open">船管上傳</span>' : ''}${d.note ? ` <span class="dim">· ${esc(d.note)}</span>` : ''}<div class="dim" style="font-size:12px">原檔名 ${esc(d.original_name)}${d.updated_at && !gone ? `・最後修改 ${dfmt(d.updated_at)}` : ''}</div>
     ${gone ? `<div class="flag" style="font-size:12px">已刪除 ${dfmt(d.deleted_at)}・${esc(d.deleted_by)}・原因：${esc(d.delete_reason)}</div>` : ''}${histHTML(d.history)}</div>
-    <div class="m">${esc(d.uploaded_by)}<br>${dfmt(d.uploaded_at)}${!gone && ed ? `<div class="doc-act"><button class="btn sm ghost" type="button" data-docedit="${esc(d.doc_id)}">修改</button><button class="btn sm ghost danger-t" type="button" data-docdel="${esc(d.doc_id)}">刪除</button></div>` : ''}${gone && can('admin') ? `<div class="doc-act"><button class="btn sm ghost" type="button" data-docrest="${esc(d.doc_id)}">還原</button></div>` : ''}</div></div>`;
+    <div class="m">${esc(String(d.uploaded_by).replace(/^mgr:(.+)$/, '船管入口（$1）'))}<br>${dfmt(d.uploaded_at)}${!gone && ed ? `<div class="doc-act"><button class="btn sm ghost" type="button" data-docedit="${esc(d.doc_id)}">修改</button>${d.origin === PSC.MGR_ORIGIN ? '' : `<button class="btn sm ghost danger-t" type="button" data-docdel="${esc(d.doc_id)}">刪除</button>`}</div>` : ''}${gone && can('admin') ? `<div class="doc-act"><button class="btn sm ghost" type="button" data-docrest="${esc(d.doc_id)}">還原</button></div>` : ''}</div></div>`;
   const live = groups.length ? groups.map(g => `<div class="docgroup"><h3>${esc(g.t.code)}　${esc(g.t.name)}</h3>${g.docs.map(d => row(d)).join('')}</div>`).join('') : '<div class="empty">尚未上傳文件</div>';
   return live + ((del || []).length ? `<details class="doc-del"><summary>已刪除的文件（${del.length}）</summary>${del.map(d => `<div class="docgroup"><h3>${esc(d.doc_type)}</h3>${row(d, true)}</div>`).join('')}</details>` : '');
 }
@@ -2447,7 +2533,7 @@ function vIncOverview(v) {
   <div class="kpi ${miss.length ? 'crit' : ''}"><div class="k">PSC 有缺失未立案</div><div class="v num">${fmt(miss.length)}</div><div class="d">${miss.length ? '點下方清單補發編號' : `${fmt(pscDef.length)} 次有缺失檢查皆已立案或為歷史資料`}</div></div></div>
   ${miss.length ? `<div class="card" style="margin-bottom:16px;border-left:3px solid var(--crit)"><h2>PSC 有缺失但未立案（${miss.length}）</h2><p class="sub">開啟後按「編輯檢查內容」→ 儲存，系統即補發事故編號</p><div class="tbl-wrap"><table><thead><tr><th>檢查日</th><th>船舶</th><th>港口</th><th class="n">缺失</th><th>檢查編號</th></tr></thead><tbody>${miss.map(I => `<tr class="click" data-open="${esc(I.insp_id)}"><td class="num">${dfmt(I.date)}</td><td>${esc(I.vessel)}</td><td>${esc(I.port)}, ${esc(I.country)}</td><td class="n">${I.defs.length}</td><td class="tn">${esc(I.insp_id)}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
   <div class="card" style="margin-bottom:16px"><div class="card-head"><div><h2>每月事故</h2><p class="sub">依事故日期；PSC = PSC 檢查有缺失自動立案</p></div><div class="legend"><span><i class="k-psc"></i>PSC</span><span><i class="k-oth"></i>其他事故</span></div></div><div class="chart" id="ch-inc-month"></div></div>
-  <div class="card" style="margin-bottom:16px"><div class="section-head"><h2>待處理事故（${open.length}）</h2><span class="dim" style="font-size:12.5px">依 RCA 期限排序；點一下開啟事故</span></div><div class="tbl-wrap"><table id="t-open"><thead><tr><th>事故編號</th><th>船舶</th><th>等級</th><th>立即通報</th><th>初步報告</th><th>RCA</th><th>PIC</th><th>簡述</th></tr></thead><tbody>${open.slice().sort((a, b) => (a.rca_due || '9') < (b.rca_due || '9') ? -1 : 1).map(x => { const has = t => x.docs.some(d => d.doc_type === t); return `<tr class="click" data-incrow="${esc(x.tracking_no)}"><td><span class="tn">${esc(x.tracking_no)}</span> ${srcPill(x)}</td><td>${esc(x.vessel)}</td><td style="white-space:nowrap">${tierPill(x.tier)} <span class="mono">${esc(x.type)}</span></td>${x.timely.map(t => `<td>${t.state === 'untracked' && t.stage !== 'rca' ? '<span class="dim" style="font-size:12px">匯入，未追蹤</span>' : t.at ? `<span class="due" style="color:var(--good)">✓ ${dfmt(t.at)}</span>` : dueCell(t.due, false, true)}</td>`).join('')}<td>${esc(x.pic)}</td><td class="nature" style="min-width:220px">${incSum(x)}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">沒有進行中的事故</td></tr>'}</tbody></table></div><p class="note">從事故登錄器匯入的事故沒有通報文件紀錄，所以立即通報 / 初步報告顯示「未追蹤」；RCA 期限依事故日期與等級推算。在事故頁上傳 FLASH / INIT / RCA 文件後即顯示已歸檔。</p></div>
+  <div class="card" style="margin-bottom:16px"><div class="section-head"><h2>待處理事故（${open.length}）</h2><span class="dim" style="font-size:12.5px">依 RCA 期限排序；點一下開啟事故</span></div><div class="tbl-wrap"><table id="t-open"><thead><tr><th>事故編號</th><th>船舶</th><th>等級</th><th>立即通報</th><th>初步報告</th><th>RCA</th><th>PIC</th><th>簡述</th></tr></thead><tbody>${open.slice().sort((a, b) => (a.rca_due || '9') < (b.rca_due || '9') ? -1 : 1).map(x => { const has = t => x.docs.some(d => d.doc_type === t); return `<tr class="click" data-incrow="${esc(x.tracking_no)}"><td><span class="tn">${esc(x.tracking_no)}</span> ${srcPill(x)}${mgrNewPill(x)}</td><td>${esc(x.vessel)}</td><td style="white-space:nowrap">${tierPill(x.tier)} <span class="mono">${esc(x.type)}</span></td>${x.timely.map(t => `<td>${t.state === 'untracked' && t.stage !== 'rca' ? '<span class="dim" style="font-size:12px">匯入，未追蹤</span>' : t.at ? `<span class="due" style="color:var(--good)">✓ ${dfmt(t.at)}</span>` : dueCell(t.due, false, true)}</td>`).join('')}<td>${esc(x.pic)}</td><td class="nature" style="min-width:220px">${incSum(x)}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">沒有進行中的事故</td></tr>'}</tbody></table></div><p class="note">從事故登錄器匯入的事故沒有通報文件紀錄，所以立即通報 / 初步報告顯示「未追蹤」；RCA 期限依事故日期與等級推算。在事故頁上傳 FLASH / INIT / RCA 文件後即顯示已歸檔。</p></div>
   <div class="grid g2" style="margin-bottom:16px"><div class="card"><h2>通報時限達成率</h2><p class="sub">依 3-TSTB-VSL-P002 6.4.2；實際提交日以事故頁填寫的日期為準，沒填時以最早歸檔的 FLASH／INIT／RCA 文件日期計；不可抗力（6.4.2.5）不計入。委外船舶列入年度評比（6.5.5），目標 ≥ ${Math.round(target * 100)}%</p>
   <div class="tbl-wrap"><table><thead><tr><th>管理公司</th><th class="n">已到期</th><th class="n">準時</th><th class="n">遲交</th><th class="n">逾期未交</th><th>準時率</th></tr></thead><tbody>${Object.entries(otM).sort((a, b) => b[1].due - a[1].due).map(([k, o]) => `<tr><td>${esc(k)}</td><td class="n">${o.due}</td><td class="n">${o.ontime}</td><td class="n">${o.late || '–'}</td><td class="n">${o.overdue ? `<b style="color:var(--crit)">${o.overdue}</b>` : '–'}</td><td class="num">${o.rate == null ? '—' : `<span class="inline-bar" style="width:${Math.round(o.rate * 70)}px;background:${o.rate >= target ? 'var(--good)' : 'var(--crit)'}"></span>${Math.round(o.rate * 100)}%`}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">沒有資料</td></tr>'}</tbody></table></div>
   <div class="tbl-wrap" style="margin-top:10px"><table><thead><tr><th>階段</th><th class="n">已到期</th><th class="n">準時</th><th class="n">遲交</th><th class="n">逾期未交</th></tr></thead><tbody>${stageAgg.map(([l, o]) => `<tr><td>${l}</td><td class="n">${o.due}</td><td class="n">${o.ontime}</td><td class="n">${o.late || '–'}</td><td class="n">${o.overdue || '–'}</td></tr>`).join('')}</tbody></table></div>
@@ -2514,7 +2600,7 @@ function vIncidents(v) {
   <div class="toolbar"><select class="sel" id="i-co">${opt('', '全部公司碼')}${cos.map(c => opt(c, c, F.co === c)).join('')}</select><select class="sel" id="i-tier">${opt('', '全部等級')}${['1', '2', '3'].map(t => opt(t, `Tier ${t} ${PSC.TIERS[t].en}`, F.tier === t)).join('')}</select>
   <select class="sel" id="i-type">${opt('', '全部類型')}${Object.entries(PSC.TYPES).map(([k, x]) => opt(k, `${k} ${x}`, F.type === k)).join('')}</select>
   <select class="sel" id="i-src">${opt('', 'PSC 與其他')}${opt('PSC', '只看 PSC', F.src === 'PSC')}${opt('OTHER', '只看非 PSC', F.src === 'OTHER')}</select><span style="flex:1"></span><span><b class="num">${list.length}</b> 筆 · ${flagged} 筆有檢核註記</span></div>
-  <div class="tbl-wrap"><table><thead><tr><th>事故編號</th><th>日期</th><th>船舶</th><th>等級</th><th>單位</th><th>狀態</th><th>RCA 期限</th><th class="n">文件</th><th>事故簡述</th></tr></thead><tbody>${list.slice(S.page * PAGE, (S.page + 1) * PAGE).map(x => `<tr class="click" data-incrow="${esc(x.tracking_no)}"><td><span class="tn">${esc(x.tracking_no)}</span> ${srcPill(x)}${x.tracking_no_std && x.tracking_no_std !== x.tracking_no ? `<div class="dim tn" style="font-size:11.5px">建議：${esc(x.tracking_no_std)}</div>` : ''}${x.check_notes ? `<div class="flag" title="${esc(x.check_notes)}">⚠ ${esc(x.check_notes.split('；')[0])}${x.check_notes.split('；').length > 1 ? ` 等 ${x.check_notes.split('；').length} 項` : ''}</div>` : ''}</td><td class="num">${dfmt(x.date)}</td><td>${esc(x.vessel)}</td><td style="white-space:nowrap">${tierPill(x.tier)} <span class="mono">${esc(x.type)}</span></td><td style="white-space:nowrap">${esc(x.unit)}</td><td>${x.void ? '<span class="stp stp-hist">作廢</span>' : x.over ? '<span class="stp stp-over">進行中・RCA 逾期</span>' : `<span class="stp stp-${x.status === ST.OPEN ? 'open' : 'closed'}">${esc(x.status)}</span>`}${x.closed_date ? `<div class="dim">${dfmt(x.closed_date)}</div>` : ''}</td><td>${x.status === ST.OPEN ? dueCell(x.rca_due, (x.ev || x.docs).some(d => d.doc_type === 'RCA'), true) : '<span class="dim">—</span>'}</td><td class="n">${x.docs.length || '–'}</td><td class="nature" style="min-width:240px">${incSum(x)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">沒有符合條件的事故</td></tr>'}</tbody></table></div><div class="pager" id="i-pager"></div></div>
+  <div class="tbl-wrap"><table><thead><tr><th>事故編號</th><th>日期</th><th>船舶</th><th>等級</th><th>單位</th><th>狀態</th><th>RCA 期限</th><th class="n">文件</th><th>事故簡述</th></tr></thead><tbody>${list.slice(S.page * PAGE, (S.page + 1) * PAGE).map(x => `<tr class="click" data-incrow="${esc(x.tracking_no)}"><td><span class="tn">${esc(x.tracking_no)}</span> ${srcPill(x)}${mgrNewPill(x)}${x.tracking_no_std && x.tracking_no_std !== x.tracking_no ? `<div class="dim tn" style="font-size:11.5px">建議：${esc(x.tracking_no_std)}</div>` : ''}${x.check_notes ? `<div class="flag" title="${esc(x.check_notes)}">⚠ ${esc(x.check_notes.split('；')[0])}${x.check_notes.split('；').length > 1 ? ` 等 ${x.check_notes.split('；').length} 項` : ''}</div>` : ''}</td><td class="num">${dfmt(x.date)}</td><td>${esc(x.vessel)}</td><td style="white-space:nowrap">${tierPill(x.tier)} <span class="mono">${esc(x.type)}</span></td><td style="white-space:nowrap">${esc(x.unit)}</td><td>${x.void ? '<span class="stp stp-hist">作廢</span>' : x.over ? '<span class="stp stp-over">進行中・RCA 逾期</span>' : `<span class="stp stp-${x.status === ST.OPEN ? 'open' : 'closed'}">${esc(x.status)}</span>`}${x.closed_date ? `<div class="dim">${dfmt(x.closed_date)}</div>` : ''}</td><td>${x.status === ST.OPEN ? dueCell(x.rca_due, (x.ev || x.docs).some(d => d.doc_type === 'RCA'), true) : '<span class="dim">—</span>'}</td><td class="n">${x.docs.length || '–'}</td><td class="nature" style="min-width:240px">${incSum(x)}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">沒有符合條件的事故</td></tr>'}</tbody></table></div><div class="pager" id="i-pager"></div></div>
   <div class="card"><h2>編號規則速查</h2><p class="sub">[公司碼]-[船名]-[YYYYMMDD]-[等級][類型]-[序號]；序號為同船同日序號 01–99（PSC 與其他事故共用）</p><div class="grid g2"><div class="tbl-wrap"><table class="ref"><thead><tr><th>等級</th><th>判定</th><th>通報 / 初報 / RCA</th></tr></thead><tbody><tr><td>${tierPill('1')} Major</td><td>人員死亡、全損、重大污染、擱淺碰撞、主機失效影響航行</td><td>2 小時 / 24 小時 / 14 天</td></tr><tr><td>${tierPill('2')} Moderate</td><td>嚴重傷害、重要設備故障、PSC 留置、PSC 缺失 ≥ ${esc(M.settings.tier2_def_threshold || 6)} 項或有 ISM 缺失、輕微污染、港口罰款</td><td>2 小時 / 24 小時 / 14 天</td></tr><tr><td>${tierPill('3')} Minor</td><td>輕傷、一般設備故障、Near Miss、PSC 缺失</td><td>12 小時 / 48 小時 / 21 天</td></tr></tbody></table></div>
   <div class="tbl-wrap"><table class="ref"><thead><tr><th>類型</th><th>說明</th></tr></thead><tbody>${Object.entries(PSC.TYPES).map(([k, x]) => `<tr><td class="mono">${k}</td><td>${esc(x)}${k === 'O' ? '（PSC 檢查一律用 O）' : ''}</td></tr>`).join('')}</tbody></table></div></div></div></div>`;
   [['#i-co', 'co'], ['#i-tier', 'tier'], ['#i-type', 'type'], ['#i-src', 'src']].forEach(([s, k]) => $(s).addEventListener('change', e => { F[k] = e.target.value; S.page = 0; render(); }));
@@ -2565,14 +2651,33 @@ function incidentDetail(v, x) {
   const ua = $('#upd-add'); if (ua) ua.addEventListener('click', () => updModal(x));
   v.querySelectorAll('[data-updedit]').forEach(b => b.addEventListener('click', () => updModal(x, x.updates.find(u => u.upd_id === b.dataset.updedit))));
   v.querySelectorAll('[data-upddel]').forEach(b => b.addEventListener('click', () => updDelModal(x.updates.find(u => u.upd_id === b.dataset.upddel))));
+  v.querySelectorAll('[data-updack]').forEach(b => b.addEventListener('click', () => run(async () => { await api('ackIncidentUpdate', { upd_id: b.dataset.updack, action: 'ack' }); await reload(); toast('已標為已閱'); }, b)));
+  v.querySelectorAll('[data-updrej]').forEach(b => b.addEventListener('click', () => updRejModal(x.updates.find(u => u.upd_id === b.dataset.updrej))));
+}
+/** 船管上傳、尚未標已閱或退回的更新 */
+function mgrNewPill(x) { const n = (x.updates || []).filter(isMgrNew).length; return n ? ` <span class="stp stp-miss" title="船管入口上傳、尚未標已閱">● 船管更新 ${n}</span>` : ''; }
+function isMgrNew(u) { return !!u && u.origin === PSC.MGR_ORIGIN && !u.ack_status && u.status !== PSC.DOC_DELETED; }
+function updRejModal(u) {
+  openModal({ title: '退回船管更新', sub: esc(u.upd_id), html: `<div class="form"><p>退回後這筆更新與附件<b>不計入通報時限</b>，船管在入口會看到退回原因，請他們重新上傳。紀錄不會刪除。</p><div class="upd-c" style="background:var(--surface-2);padding:8px 10px;border-radius:8px;max-height:160px;overflow:auto">${esc(u.content)}</div><div class="field"><label for="ur-why">退回原因（必填，船管看得到；建議中英文）</label><textarea class="inp" id="ur-why" rows="3" placeholder="例：附件不是初步報告，請上傳 Template 2。The attachment is not the Initial Report; please upload Template 2."></textarea></div><div id="ur-err" class="err"></div></div>`,
+    foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn danger" type="button" id="ur-go">確認退回</button>`,
+    onMount(root, close) { const q = k => root.querySelector(k); q('[data-close]').addEventListener('click', close);
+      q('#ur-go').addEventListener('click', () => run(async () => { const note = q('#ur-why').value.trim(); if (!note) { q('#ur-err').textContent = '請填寫退回原因'; return; } await api('ackIncidentUpdate', { upd_id: u.upd_id, action: 'reject', note }); await close(); await reload(); toast('已退回，船管會在入口看到原因'); }, q('#ur-go'))); } });
 }
 /* ---------- 管理公司更新紀錄：海技人員直接登錄（電話、Email 內文、會議…），不必上傳檔案；階段計入通報時限 ---------- */
 const UPD_NAME = Object.fromEntries(PSC.UPD_STAGES.map(x => [x.k, x.name]));
 function incUpdatesHTML(x) {
   const ed = can('editor') && !x.void, list = x.updates || [], del = x.updatesDel || [];
-  const item = (u, gone) => `<li class="upd${gone ? ' gone' : ''}"><div class="upd-h"><span class="num upd-t">${esc(u.received_at)} UTC</span><span class="pill cat">${esc(UPD_NAME[u.stage] || u.stage)}</span><span class="dim">${esc([u.source, u.channel].filter(Boolean).join('・'))}</span>${!gone && ed ? `<span class="upd-act"><button class="btn sm ghost" type="button" data-updedit="${esc(u.upd_id)}">修改</button><button class="btn sm ghost danger-t" type="button" data-upddel="${esc(u.upd_id)}">刪除</button></span>` : ''}</div>
-    <div class="upd-c">${esc(u.content)}</div><div class="dim" style="font-size:11.5px">${esc(u.upd_id)}・登錄 ${esc(u.entered_by)}${u.updated_at ? `・最後修改 ${dfmt(u.updated_at)}` : ''}</div>${histHTML(u.history)}</li>`;
-  return `<div class="card" style="margin-bottom:16px" id="inc-upd"><div class="section-head"><div><h2>管理公司更新紀錄（${list.length}）</h2><p class="sub" style="margin:2px 0 0">管理公司用電話、Email 內文或會議提供的資訊，由海技人員直接登錄，不必上傳檔案。登錄為「立即通報／初步報告／進度更新／RCA」時，計入通報時限（以收到時間計）。</p></div>${ed ? '<button class="btn primary" type="button" id="upd-add">新增更新</button>' : ''}</div>
+  const allDocs = (x.docs || []).concat(x.docsDel || []), unread = list.filter(isMgrNew).length;
+  const files = u => String(u.doc_ids || '').split(',').filter(Boolean).map(id => allDocs.find(d => d.doc_id === id) || { doc_id: id, original_name: id });
+  const acts = u => { if (!ed) return '';
+    if (u.origin === PSC.MGR_ORIGIN) return `<span class="upd-act">${u.ack_status !== '已閱' ? `<button class="btn sm" type="button" data-updack="${esc(u.upd_id)}">${u.ack_status === '退回' ? '取消退回（已閱）' : '✓ 已閱'}</button>` : ''}${u.ack_status !== '退回' ? `<button class="btn sm ghost danger-t" type="button" data-updrej="${esc(u.upd_id)}">退回</button>` : ''}</span>`;
+    return `<span class="upd-act"><button class="btn sm ghost" type="button" data-updedit="${esc(u.upd_id)}">修改</button><button class="btn sm ghost danger-t" type="button" data-upddel="${esc(u.upd_id)}">刪除</button></span>`; };
+  const item = (u, gone) => { const mg = u.origin === PSC.MGR_ORIGIN, fs = files(u);
+    return `<li class="upd${gone ? ' gone' : ''}${mg ? ' mgr' : ''}${u.ack_status === '退回' ? ' rej' : ''}${isMgrNew(u) ? ' new' : ''}"><div class="upd-h"><span class="num upd-t">${esc(u.received_at)} UTC</span><span class="pill cat">${esc(UPD_NAME[u.stage] || u.stage)}</span>${mg ? '<span class="stp stp-open">船管上傳</span>' : ''}${u.ack_status === '已閱' ? '<span class="stp stp-closed">已閱</span>' : u.ack_status === '退回' ? '<span class="stp stp-over">已退回・不計入時限</span>' : mg ? '<span class="stp stp-miss">● 待閱</span>' : ''}<span class="dim">${esc([u.source, u.channel].filter(Boolean).join('・'))}</span>${!gone ? acts(u) : ''}</div>
+    ${u.ack_status === '退回' && u.ack_note ? `<div class="upd-rej">退回原因（船管看得到）：${esc(u.ack_note)}</div>` : ''}
+    <div class="upd-c">${esc(u.content)}</div>${fs.length ? `<div class="upd-files">${fs.map(d => d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">📎 ${esc(d.original_name || d.file_name)}</a>` : `<span>📎 ${esc(d.original_name || d.doc_id)}</span>`).join('')}</div>` : ''}
+    <div class="dim" style="font-size:11.5px">${esc(u.upd_id)}・${mg ? '船管入口' + (u.reply_email ? '・回執 ' + esc(u.reply_email) : '') : '登錄 ' + esc(u.entered_by)}${u.ack_at ? `・${esc(u.ack_status)} ${esc(u.ack_by)} ${esc(PSC.utcMinute(u.ack_at))} UTC` : ''}${u.updated_at ? `・最後修改 ${dfmt(u.updated_at)}` : ''}</div>${histHTML(u.history)}</li>`; };
+  return `<div class="card" style="margin-bottom:16px" id="inc-upd"><div class="section-head"><div><h2>管理公司更新紀錄（${list.length}${unread ? `，<span style="color:var(--crit)">${unread} 筆待閱</span>` : ''}）</h2><p class="sub" style="margin:2px 0 0">「船管上傳」是管理公司在船管入口自行上傳，上傳時間即收到時間並計入通報時限；請標「已閱」，內容不符按「退回」並寫原因（船管看得到，退回的不計入時限），船管的紀錄不能修改或刪除。電話、Email 內文或會議提供的資訊，仍可由海技人員按「新增更新」登錄。</p></div>${ed ? '<button class="btn primary" type="button" id="upd-add">新增更新</button>' : ''}</div>
   ${list.length ? `<ol class="upd-list">${list.map(u => item(u)).join('')}</ol>` : '<div class="empty">尚無更新紀錄</div>'}
   ${del.length ? `<details class="doc-del"><summary>已刪除的更新（${del.length}）</summary><ol class="upd-list">${del.map(u => item(u, true)).join('')}</ol></details>` : ''}</div>`;
 }
@@ -2889,6 +2994,9 @@ function vAdmin(v) {
   <div class="frow">${[['tmou_white_flags', '船旗 High 名單（LRS 條件）'], ['tmou_black_flags', '船旗 Low 名單（HRS +1）'], ['tmou_ro_high', 'RO High 名單（LRS 條件）'], ['tmou_ro_low', 'RO Low 名單（HRS +1）']].map(([k, l]) => `<div class="field"><label for="tm-${k}">${l}</label><textarea class="inp" rows="3" id="tm-${k}" data-tm="${k}">${esc(set[k] || '')}</textarea></div>`).join('')}</div>
   <div class="field"><label for="tm-docs">高績效公司名單（ISM DOC 公司 IMO）</label><textarea class="inp mono" rows="2" id="tm-docs" data-tm="tmou_high_perf_docs">${esc(set.tmou_high_perf_docs || '')}</textarea><span class="hint">從「List of high performing companies」PDF 複製公司 IMO 即可，系統只看 7 位數字</span></div>
   <div class="btnrow"><button class="btn primary" type="button" id="tm-save">儲存</button></div></div></div>
+  <div class="card" style="margin-bottom:16px" id="mc-card"><div class="section-head"><div><h2>船管公司入口</h2><p class="sub" style="margin:2px 0 0">船管公司用「公司存取碼」登入入口，查看自家進行中的事故、上傳報告與更新（上傳時間即收到時間，計入通報時限），不需 Google 帳號。存取碼只在產生當下顯示一次，系統只存加密後的雜湊；請<b>口頭或另行告知</b>，不要用 email 寄送。換碼或停用後，舊碼與已登入的連線立即失效。</p></div></div>
+  <div class="form"><div class="field"><label>船管入口網址（可寄給船管公司；網址本身不含存取碼）</label><div class="btnrow"><input class="inp mono" id="mc-url" readonly value="${esc(mgrPortalUrl())}" style="flex:1;min-width:240px"><button class="btn" type="button" id="mc-copy">複製網址</button></div></div>
+  <div id="mc-list"><p class="dim">讀取中…</p></div></div></div>
   <div class="card" style="margin-bottom:16px" id="rg-card"><div class="section-head"><div><h2>登輪系統自動收件</h2><p class="sub" style="margin:2px 0 0">登輪審查系統收到的訪船報告自動轉入訪船缺失：讀登輪試算表的 REGISTER 分頁，狀態 Completed、符合下列申請方與類別、報告 PDF 在起始日以後上傳的案件。兩個系統要用同一個 Google 帳號部署。</p></div></div>
   <div class="form"><div class="field"><label for="rg-sheet">登輪系統試算表網址</label><textarea class="inp mono" rows="2" id="rg-sheet" placeholder="https://docs.google.com/spreadsheets/d/…/edit">${esc(set.register_sheet_id || '')}</textarea><span class="hint">貼網址或 ID 都可以；不確定是哪一個就兩個都貼，用逗號隔開，系統自動找登輪紀錄分頁（REGISTER，或表頭有 Reference、Status、ReportFile 的分頁；網址帶 gid 時先看那個分頁）。留空＝不自動收件</span></div>
   <div class="frow"><div class="field"><label for="rg-from">起始日</label><input class="inp" type="date" id="rg-from" value="${esc(PSC.isoDate(set.register_sync_from) || '2026-11-06')}"><span class="hint">這一天以後上傳的報告才自動建檔</span></div><div class="field"><label for="rg-party">申請方</label><input class="inp" id="rg-party" value="${esc(set.register_sync_parties || 'MGR')}"><span class="hint">MGR 船管；逗號分隔</span></div><div class="field"><label for="rg-type">訪船類別</label><input class="inp" id="rg-type" value="${esc(set.register_sync_types || 'VIR')}"><span class="hint">VIR 全船檢查；逗號分隔</span></div></div>
@@ -2955,6 +3063,7 @@ function vAdmin(v) {
     const rows = [['register_sheet_id', sheet], ['register_sync_from', from], ['register_sync_parties', $('#rg-party').value.trim().toUpperCase() || 'MGR'], ['register_sync_types', $('#rg-type').value.trim().toUpperCase() || 'VIR']].map(([key, value]) => ({ key, value, note: d(key) }));
     await api('saveSettings', { rows }); await reload();
   };
+  wireMgrCodes();
   $('#rg-save').addEventListener('click', () => run(async () => { await rgSave(); toast('已儲存登輪系統自動收件設定'); }, $('#rg-save')));
   $('#rg-test').addEventListener('click', () => run(async () => {
     await rgSave(); await autoVirSync(true);
@@ -3381,5 +3490,5 @@ if (CFG.demo) {
   if (tok && p.exp && Date.now() / 1000 < p.exp - 60) { Object.assign(Auth, { token: tok, email: p.email, name: p.name, exp: p.exp }); start(); }
   else showLogin();
 }
-window.__PSCAPP = { get M() { return M; }, S, api, reload, autoVirSync, VSYNC, LOADT };
+window.__PSCAPP = { get M() { return M; }, S, api, reload, autoVirSync, VSYNC, LOADT, demoMgr: (co, p) => { if (!CFG.demo) throw new Error('只限示範模式'); return PSC.handle(Demo.store, { email: 'mgr:' + co, name: (PSC.CO_EN && PSC.CO_EN[co]) || co, role: 'manager', company: co }, 'mgrSubmit', p); } };
 })();

@@ -647,6 +647,10 @@ body.dragging-cards *{cursor:grabbing!important}
 .upd-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12.5px}
 .upd-t{font-weight:600}.upd-act{margin-left:auto;display:flex;gap:4px}
 .upd-c{white-space:pre-wrap;font-size:13.5px;margin:4px 0 2px;line-height:1.55}
+.upd.mgr{border-left-color:var(--s2)}.upd.new{background:color-mix(in srgb,var(--warn-soft) 55%,transparent);border-radius:0 8px 8px 0;padding-right:8px}
+.upd.rej{border-left-color:var(--crit)}.upd.rej .upd-c{color:var(--ink-2)}
+.upd-rej{font-size:12.5px;color:var(--crit);margin-top:4px}
+.upd-files{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:12.5px;margin:2px 0 4px}.upd-files a{color:var(--accent)}
 
 /* v1.16 台灣港口國檢查 */
 .mou.tw{color:var(--rk-m);font-weight:600}
@@ -665,3 +669,10 @@ body.dragging-cards *{cursor:grabbing!important}
 @keyframes vsp{from{opacity:.3}to{opacity:1}}
 @media (prefers-reduced-motion:reduce){.vs-dot.on{animation:none}}
 .vsync-d .btnrow{flex-wrap:wrap}
+
+/* v1.18 綜合資訊：未結案事故更新狀況 */
+.hm-upd td{vertical-align:top}
+.hm-upd tr.hm-new td:first-child{box-shadow:inset 3px 0 0 var(--s2)}
+.hm-snip{font-size:12.5px;color:var(--ink-2);margin-top:2px;overflow-wrap:anywhere}
+.hm-idle{color:var(--warn-ink);font-weight:600}
+.mc-code{font-size:34px;letter-spacing:.22em;text-align:center;font-weight:600;padding:14px;border:1px dashed var(--line-2);border-radius:12px;background:var(--surface-2);user-select:all}

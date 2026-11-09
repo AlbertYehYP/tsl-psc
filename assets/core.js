@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.17.3';
+  var VERSION = '1.18.0';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -278,8 +278,9 @@ var PSC = (function () {
     Deficiencies: ['def_id', 'insp_id', 'tracking_no', 'seq', 'code', 'category', 'nature', 'action', 'deadline',
       'rectified', 'rectified_date', 'corrective_action', 'remarks', 'updated_by', 'updated_at'],
     Documents: ['doc_id', 'insp_id', 'tracking_no', 'doc_type', 'seq', 'file_name', 'original_name', 'mime', 'size',
-      'file_id', 'url', 'note', 'uploaded_by', 'uploaded_at', 'status', 'deleted_by', 'deleted_at', 'delete_reason', 'history', 'updated_by', 'updated_at'],
-    IncidentUpdates: ['upd_id', 'tracking_no', 'received_at', 'stage', 'source', 'channel', 'content', 'entered_by', 'entered_at', 'status', 'history', 'updated_by', 'updated_at'],
+      'file_id', 'url', 'note', 'uploaded_by', 'uploaded_at', 'status', 'deleted_by', 'deleted_at', 'delete_reason', 'history', 'updated_by', 'updated_at', 'upd_id', 'origin'],
+    IncidentUpdates: ['upd_id', 'tracking_no', 'received_at', 'stage', 'source', 'channel', 'content', 'entered_by', 'entered_at', 'status', 'history', 'updated_by', 'updated_at',
+      'origin', 'reporter', 'reply_email', 'doc_ids', 'ack_status', 'ack_by', 'ack_at', 'ack_note'],
     Incidents: ['tracking_no', 'tracking_no_std', 'date', 'company', 'vessel', 'imo', 'tier', 'type', 'priority', 'unit',
       'status', 'pic', 'summary', 'closed_date', 'source', 'insp_id', 'check_notes', 'flash_due', 'initial_due', 'rca_due',
       'corrective_action', 'created_by', 'created_at', 'updated_by', 'updated_at',
@@ -409,6 +410,8 @@ var PSC = (function () {
     { key: 'tmou_high_perf_period', value: '2026 Q3', note: '高績效公司名單的季度（顯示用）' },
     { key: 'window_alert_days', value: '30', note: '窗口提醒：幾天內將進入窗口或關閉時提醒' },
     { key: 'alert_emails', value: '', note: '每日 PSC 窗口提醒收件人（逗號分隔）；空白不寄信' },
+    { key: 'site_url', value: 'https://tsl-psc.vercel.app', note: '系統網址（通知信內的連結用；船管入口為此網址加 /manager.html）。只放固定網域，不放存取碼' },
+    { key: 'mgr_notify_cc', value: '', note: '船管入口有新更新時，除該船 PIC 外另外通知的信箱（逗號分隔）；空白＝只寄 PIC' },
     { key: 'nk_class_fields', value: 'class_society,class_number,flag,flag_code,port_of_registry,registered_owner,ism_company,date_of_build,gross_tonnage,deadweight,teu', note: '匯入船舶主檔時以船級（Class）資料為準的欄位：與系統不同時直接改成 Class 的值（例如裝脫硫塔後 TEU 略減）。改名 / 換管理前的舊列只更新建造日期、GT、DWT、TEU' }
   ];
 
@@ -705,6 +708,7 @@ var PSC = (function () {
     var d = findDoc(store, p.doc_id), reason = s(p.reason);
     if (!reason) throw new Error('請填寫刪除原因');
     if (s(d.status) === DOC_DELETED) throw new Error('文件已刪除');
+    if (s(d.origin) === MGR_ORIGIN) throw new Error('船管公司自行上傳的文件不能刪除；請到「管理公司更新紀錄」把那筆更新「退回」並寫明原因');
     var moved = '';
     if (s(d.file_id) && typeof store.moveToDeleted === 'function') { try { store.moveToDeleted(d.file_id); moved = '；Drive 檔已移到「已刪除文件」'; } catch (e) { moved = '；Drive 檔移動失敗：' + (e && e.message || e); } }
     var patch = { status: DOC_DELETED, deleted_by: user.email, deleted_at: store.now(), delete_reason: reason, history: addHistory(d.history, stampLine(store, user, '刪除' + moved, reason)), updated_by: user.email, updated_at: store.now() };
@@ -739,6 +743,7 @@ var PSC = (function () {
     if (s(p.upd_id)) {
       var old = store.all('IncidentUpdates').filter(function (x) { return s(x.upd_id) === s(p.upd_id); })[0]; if (!old) throw new Error('找不到更新紀錄 ' + p.upd_id);
       if (s(old.status) === DOC_DELETED) throw new Error('這筆更新已刪除');
+      if (s(old.origin) === MGR_ORIGIN) throw new Error('船管公司自行上傳的更新不能修改；內容有誤請按「退回」並寫明原因');
       if (!s(p.reason)) throw new Error('請填寫修改原因');
       var what = ['received_at', 'stage', 'source', 'channel', 'content'].filter(function (f) { return s(old[f]) !== s(row[f]); }).map(function (f) { return ({ received_at: '時間', stage: '階段', source: '來源', channel: '管道', content: '內容' })[f] + (f === 'content' ? '' : ' ' + (s(old[f]) || '—') + ' → ' + (s(row[f]) || '—')); });
       if (!what.length) throw new Error('沒有變更');
@@ -760,6 +765,7 @@ var PSC = (function () {
     var old = store.all('IncidentUpdates').filter(function (x) { return s(x.upd_id) === s(p.upd_id); })[0]; if (!old) throw new Error('找不到更新紀錄 ' + p.upd_id);
     if (!s(p.reason)) throw new Error('請填寫刪除原因');
     if (s(old.status) === DOC_DELETED) throw new Error('這筆更新已刪除');
+    if (s(old.origin) === MGR_ORIGIN) throw new Error('船管公司自行上傳的更新不能刪除；請改按「退回」並寫明原因（退回的更新不計入通報時限）');
     var patch = { status: DOC_DELETED, history: addHistory(old.history, stampLine(store, user, '刪除', p.reason)), updated_by: user.email, updated_at: store.now() };
     store.update('IncidentUpdates', 'upd_id', old.upd_id, patch);
     audit(store, user, 'delete_incident_update', old.upd_id, '原因：' + s(p.reason));
@@ -767,9 +773,96 @@ var PSC = (function () {
   }
   /** 通報時限判定用的「證據」：未刪除的文件＋未刪除的更新紀錄（更新紀錄視同該階段的文件，以收到時間計） */
   function evidenceDocs(docs, updates) {
-    var out = (docs || []).filter(function (d) { return s(d.status) !== DOC_DELETED; });
-    (updates || []).forEach(function (u) { if (s(u.status) === DOC_DELETED) return; var st = UPD_STAGES.filter(function (x) { return x.k === s(u.stage); })[0]; if (st && st.doc) out.push({ doc_type: st.doc, uploaded_at: s(u.received_at).replace(' ', 'T') + ':00Z', upd_id: u.upd_id, via: 'update' }); });
+    var rej = {}; (updates || []).forEach(function (u) { if (s(u.ack_status) === UPD_REJECTED) rej[s(u.upd_id)] = 1; });
+    var out = (docs || []).filter(function (d) { return s(d.status) !== DOC_DELETED && !(s(d.upd_id) && rej[s(d.upd_id)]); });
+    (updates || []).forEach(function (u) { if (s(u.status) === DOC_DELETED || s(u.ack_status) === UPD_REJECTED) return; var st = UPD_STAGES.filter(function (x) { return x.k === s(u.stage); })[0]; if (st && st.doc) out.push({ doc_type: st.doc, uploaded_at: s(u.received_at).replace(' ', 'T') + ':00Z', upd_id: u.upd_id, via: 'update' }); });
     return out;
+  }
+
+  /* ---------------- 船管公司入口（v1.18）：船管以公司存取碼登入，查看自家未結案事故、上傳報告與更新 ---------------- */
+  var MGR_ORIGIN = 'manager', UPD_REJECTED = '退回', UPD_ACKED = '已閱', MGR_CHANNEL = '船管入口';
+  var MGR_ACTIONS = ['mgrCases', 'mgrSubmit'];
+  var MGR_MAX_FILES = 5, MGR_MAX_B64 = 27000000;
+  var MGR_STAGE_EN = { flash: 'Flash Report', initial: 'Initial Report', progress: 'Progress Update', rca: 'Root Cause Analysis (RCA)', close: 'Closure Confirmation', other: 'Other Information' };
+  function needMgr(user) { if (!user || user.role !== 'manager' || !s(user.company)) throw new Error('請先以公司存取碼登入 Please sign in with your company access code'); }
+  function mgrIncident(store, user, no) {
+    var inc = store.all('Incidents').filter(function (x) { return s(x.tracking_no) === s(no); })[0];
+    if (!inc || up(inc.company) !== up(user.company)) throw new Error('找不到這件事故 Case not found: ' + s(no));
+    if (s(inc.status) !== STATUS.OPEN) throw new Error('這件事故已結案，不能再上傳 This case is closed');
+    return inc;
+  }
+  function mgrStageName(k) { var st = UPD_STAGES.filter(function (x) { return x.k === k; })[0]; return st ? st.name : k; }
+  /** 船管看得到的內容：自家公司「進行中」的事故，基本資料、期限與狀態、已收到的更新與文件名稱（不含內部檢核、回信紀錄、Drive 連結） */
+  function mgrCases(store, user) {
+    needMgr(user);
+    var co = up(user.company), today = isoDate(store.now()), rules = store.all('Rules'); if (!rules.length) rules = DEFAULT_RULES;
+    var insps = {}; store.all('Inspections').forEach(function (r) { insps[r.insp_id] = r; });
+    var defs = store.all('Deficiencies'), docs = store.all('Documents'), upds = []; try { upds = store.all('IncidentUpdates'); } catch (e) { upds = []; }
+    var cases = store.all('Incidents').filter(function (x) { return up(x.company) === co && s(x.status) === STATUS.OPEN; }).map(function (x) {
+      var I = s(x.insp_id) ? insps[x.insp_id] : null;
+      var dd = docs.filter(function (d) { return s(d.status) !== DOC_DELETED && (I ? s(d.insp_id) === s(I.insp_id) : (!s(d.insp_id) && s(d.tracking_no) === s(x.tracking_no))); });
+      var uu = upds.filter(function (u) { return s(u.tracking_no) === s(x.tracking_no) && s(u.status) !== DOC_DELETED; }).sort(function (a, b) { return s(a.received_at) < s(b.received_at) ? 1 : -1; });
+      var inc = Object.assign({}, x, incidentDeadlines(x, rules));
+      var tl = reportTimeliness(inc, evidenceDocs(dd, uu), today);
+      return {
+        tracking_no: x.tracking_no, date: isoDate(x.date), vessel: x.vessel, imo: x.imo, tier: x.tier, type: x.type, type_name: TYPES[s(x.type)] || '', psc: !!I,
+        summary: s(x.summary), location: s(x.location) || (I ? [I.port, I.country].filter(Boolean).join(', ') : ''),
+        port: I ? s(I.port) : '', mou: I ? s(I.mou) : '', detention: I ? s(I.detention) : '', def_count: I ? s(I.def_count) : '',
+        deficiencies: I ? defs.filter(function (d) { return s(d.insp_id) === s(I.insp_id); }).map(function (d) { return { seq: d.seq, code: d.code, nature: d.nature, action: d.action, rectified: d.rectified === 'Y' }; }) : [],
+        due: { flash: inc.flash_due, initial: inc.initial_due, rca: inc.rca_due },
+        timely: tl.map(function (t) { return { stage: t.stage, label: t.label, en: MGR_STAGE_EN[t.stage] || t.stage, due: t.due, at: t.at, state: t.state }; }),
+        updates: uu.map(function (u) { return { upd_id: u.upd_id, received_at: u.received_at, stage: u.stage, stage_name: mgrStageName(s(u.stage)), stage_en: MGR_STAGE_EN[s(u.stage)] || '', origin: s(u.origin) === MGR_ORIGIN ? MGR_ORIGIN : 'tsl', reporter: s(u.origin) === MGR_ORIGIN ? s(u.reporter) : '', channel: u.channel, content: u.content, ack_status: s(u.ack_status), ack_note: s(u.ack_status) === UPD_REJECTED ? s(u.ack_note) : '' }; }),
+        docs: dd.map(function (d) { var t = DOC_TYPES.filter(function (q) { return q.code === d.doc_type; })[0]; return { doc_type: d.doc_type, doc_name: t ? t.name : d.doc_type, name: s(d.original_name) || s(d.file_name), uploaded_at: utcMinute(d.uploaded_at), origin: s(d.origin) === MGR_ORIGIN ? MGR_ORIGIN : 'tsl', upd_id: s(d.upd_id) }; }).sort(function (a, b) { return a.uploaded_at < b.uploaded_at ? 1 : -1; })
+      };
+    }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+    return { company: co, name: s(user.name), today: today, now: utcMinute(store.now()), cases: cases,
+      stages: UPD_STAGES.map(function (st) { return { k: st.k, name: st.name, en: MGR_STAGE_EN[st.k] }; }) };
+  }
+  /** 船管上傳：一次一筆更新（文字＋最多 5 個檔案）。上傳時間（UTC）即收到時間，直接計入通報時限；檔案存成該階段的文件 */
+  function mgrSubmit(store, user, p) {
+    needMgr(user);
+    var inc = mgrIncident(store, user, p.tracking_no);
+    var st = UPD_STAGES.filter(function (x) { return x.k === s(p.stage); })[0]; if (!st) throw new Error('請選擇更新階段 Please choose the report stage');
+    var files = (p.files || []).filter(function (f) { return f && f.base64; });
+    var reporter = s(p.reporter), content = s(p.content), mail = s(p.reply_email);
+    if (!reporter) throw new Error('請填寫填報人姓名與職稱 Please enter your name and position');
+    if (!content && !files.length) throw new Error('請填寫更新內容或附上檔案 Please enter the update or attach a file');
+    if (files.length > MGR_MAX_FILES) throw new Error('一次最多 ' + MGR_MAX_FILES + ' 個檔案 Up to ' + MGR_MAX_FILES + ' files per update');
+    var b64 = 0; files.forEach(function (f) { b64 += String(f.base64).length; }); if (b64 > MGR_MAX_B64) throw new Error('檔案合計超過 20 MB Files exceed 20 MB in total');
+    if (mail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(mail)) throw new Error('回覆信箱格式不正確 Invalid email address');
+    var no = s(inc.tracking_no), now = store.now(), at = utcMinute(now);
+    var n = store.all('IncidentUpdates').filter(function (x) { return s(x.tracking_no) === no; }).length + 1, id = no + '-U' + pad2(n);
+    var owner = docOwner(store, { tracking_no: no }), base = owner.tracking_no || owner.insp_id, type = st.doc || 'CORR', ids = [], names = [];
+    files.forEach(function (f) {
+      var k = 0; store.all('Documents').forEach(function (d) { if ((d.tracking_no || d.insp_id) === base && d.doc_type === type) k = Math.max(k, Number(d.seq) || 0); }); k += 1;
+      var docId = documentId(base, type, k), fileName = documentFileName(docId, f.name);
+      var file = store.putFile(folderPath(owner), fileName, s(f.mime) || 'application/octet-stream', f.base64);
+      var row = { doc_id: docId, insp_id: owner.insp_id || '', tracking_no: owner.tracking_no || '', doc_type: type, seq: String(k), file_name: fileName, original_name: s(f.name), mime: s(f.mime), size: String(f.size || ''),
+        file_id: file.id, url: file.url, note: '船管入口上傳（' + st.name + '）｜' + reporter, uploaded_by: user.email, uploaded_at: now, status: '', history: stampLine(store, user, '船管入口上傳', ''), upd_id: id, origin: MGR_ORIGIN };
+      var full = {}; SCHEMA.Documents.forEach(function (c) { full[c] = row[c] === undefined ? '' : row[c]; });
+      store.insert('Documents', full); ids.push(docId); names.push(s(f.name));
+    });
+    var row = { upd_id: id, tracking_no: no, received_at: at, stage: st.k, source: s(user.name) + '｜' + reporter, channel: MGR_CHANNEL,
+      content: content || '（附件 Attachments：' + names.join('、') + '）', entered_by: user.email, entered_at: now, status: '',
+      history: stampLine(store, user, '船管入口新增（' + st.name + '）' + (names.length ? '，附件 ' + names.length + ' 個' : ''), ''), origin: MGR_ORIGIN, reporter: reporter, reply_email: mail, doc_ids: ids.join(',') };
+    var fullU = {}; SCHEMA.IncidentUpdates.forEach(function (c) { fullU[c] = row[c] === undefined ? '' : row[c]; });
+    store.insert('IncidentUpdates', fullU);
+    audit(store, user, 'mgr_submit', id, st.name + '｜' + reporter + (names.length ? '｜附件：' + names.join('、') : ''));
+    return { upd_id: id, tracking_no: no, vessel: inc.vessel, imo: inc.imo, pic: inc.pic, stage: st.k, stage_name: st.name, stage_en: MGR_STAGE_EN[st.k], received_at: at, reporter: reporter, reply_email: mail, content: fullU.content, docs: ids, files: names, company: up(user.company), company_name: s(user.name) };
+  }
+  /** 海技對船管更新標「已閱」或「退回」（退回要原因；退回的更新與其附件不計入通報時限）。再按已閱可取消退回 */
+  function ackIncidentUpdate(store, user, p) {
+    need(user, 'editor');
+    var old = store.all('IncidentUpdates').filter(function (x) { return s(x.upd_id) === s(p.upd_id); })[0]; if (!old) throw new Error('找不到更新紀錄 ' + p.upd_id);
+    if (s(old.status) === DOC_DELETED) throw new Error('這筆更新已刪除');
+    var act = s(p.action) === 'reject' ? UPD_REJECTED : UPD_ACKED, note = s(p.note);
+    if (act === UPD_REJECTED && !note) throw new Error('請填寫退回原因（船管公司會看到）');
+    if (act === s(old.ack_status) && note === s(old.ack_note)) return old;
+    var patch = { ack_status: act, ack_by: user.email, ack_at: store.now(), ack_note: note,
+      history: addHistory(old.history, stampLine(store, user, act === UPD_REJECTED ? '退回' : (s(old.ack_status) === UPD_REJECTED ? '取消退回，標為已閱' : '已閱'), act === UPD_REJECTED ? note : '')) };
+    store.update('IncidentUpdates', 'upd_id', old.upd_id, patch);
+    audit(store, user, act === UPD_REJECTED ? 'reject_incident_update' : 'ack_incident_update', old.upd_id, note);
+    return Object.assign({}, old, patch);
   }
 
   function setCaseStatus(store, user, p) {
@@ -2650,7 +2743,11 @@ var PSC = (function () {
 
   function handle(store, user, action, payload) {
     payload = payload || {};
+    if (user && user.role === 'manager' && MGR_ACTIONS.indexOf(action) < 0) throw new Error('權限不足 Not permitted');
     switch (action) {
+      case 'mgrCases': return mgrCases(store, user);
+      case 'mgrSubmit': return store.lock(function () { return mgrSubmit(store, user, payload); });
+      case 'ackIncidentUpdate': return store.lock(function () { return ackIncidentUpdate(store, user, payload); });
       case 'whoami': return user;
       case 'bootstrap': return bootstrap(store, user);
       case 'previewNumber': return previewNumber(store, user, payload);
@@ -2705,7 +2802,7 @@ var PSC = (function () {
     deadlines: deadlines, pscTier: pscTier, vesselAt: vesselAt, handle: handle,
     BRIBE_FIELDS: BRIBE_FIELDS, parseBribe: parseBribe, bribeFlag: bribeFlag, canBribe: canBribe, num: num,
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
-    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, SYNC: SYNC, evidenceDocs: evidenceDocs, UPD_STAGES: UPD_STAGES, UPD_CHANNELS: UPD_CHANNELS, DOC_DELETED: DOC_DELETED, utcMinute: utcMinute, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
+    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, SYNC: SYNC, evidenceDocs: evidenceDocs, UPD_STAGES: UPD_STAGES, UPD_CHANNELS: UPD_CHANNELS, MGR_ORIGIN: MGR_ORIGIN, UPD_REJECTED: UPD_REJECTED, UPD_ACKED: UPD_ACKED, MGR_CHANNEL: MGR_CHANNEL, MGR_STAGE_EN: MGR_STAGE_EN, CO_EN: CO_EN, DOC_DELETED: DOC_DELETED, utcMinute: utcMinute, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
     TOKYO: TOKYO, TAIWAN_PSC: TAIWAN_PSC, TW_PORTS: TW_PORTS, twPort: twPort, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
     incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
     DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,
