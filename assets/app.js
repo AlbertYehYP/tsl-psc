@@ -14,7 +14,7 @@ const TAB_LIST = Object.values(SECTIONS).flatMap(x => x.tabs.map(t => t[0]));
 const secOf = t => Object.keys(SECTIONS).find(k => SECTIONS[k].tabs.some(x => x[0] === t)) || 'psc';
 const MAX_MB = 20;
 /** 前端程式版本（與 core.js 的 PSC.VERSION、後端 core.gs 必須一致） */
-const APP_VERSION = '1.18.0';
+const APP_VERSION = '1.19.0';
 /** 版本不一致警示：顯示在頁首下方，避免瀏覽器快取舊檔或漏更新某個檔案時沒人發現 */
 function versionBanner(kind, html) {
   let el = document.getElementById('ver-bar');
@@ -485,7 +485,7 @@ function vVisits(v) {
   const f = S.vfF || (S.vfF = { st: '', co: '', party: '', q: '' });
   const cos = [...new Set(M.visits.map(x => x.company))].sort();
   const list = M.visits.filter(x => (!f.co || x.company === f.co) && (!f.party || x.party === f.party) && (!f.st || (f.st === 'open' ? !x.closed : x.closed)) && (!f.q || (x.visit_no + ' ' + x.vessel + ' ' + x.inspector + ' ' + x.port).toLowerCase().includes(f.q.toLowerCase())));
-  v.innerHTML = vsyncHTML() + `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>訪船紀錄</h2><p class="sub" style="margin:2px 0 0">每次登輪（管理公司 VIR、船東訪船、稽核等）一筆，編號沿用船管登輪審查系統的配號，例 TEH-VICTORY-2026-01-MGR-VIR。報告中的缺失逐項追蹤到關閉。</p></div>${can('editor') ? '<div class="btnrow"><button class="btn" type="button" id="vs-new">新增訪船紀錄</button><button class="btn primary" type="button" id="vs-pdf">上傳 VIR 報告 PDF</button></div>' : ''}</div>
+  v.innerHTML = vsyncHTML() + `<div class="card" style="margin-bottom:16px"><div class="section-head"><div><h2>訪船紀錄</h2><p class="sub" style="margin:2px 0 0">每次登輪（管理公司 VIR、船東訪船、稽核等）一筆，編號沿用船管登輪審查系統的配號，例 TEH-VICTORY-2026-01-MGR-VIR。報告中的缺失逐項追蹤到關閉。</p></div>${can('editor') ? '<div class="btnrow"><button class="btn" type="button" id="vs-new">新增訪船紀錄</button><button class="btn primary" type="button" id="vs-pdf">上傳訪船報告（PDF／Excel）</button></div>' : ''}</div>
   <div class="rp-ctl"><div class="chips">${[['', '全部'], ['open', '有未關閉缺失'], ['closed', '已全部關閉']].map(([k, l]) => `<button class="chip" type="button" data-vst="${k}" aria-pressed="${f.st === k}">${l}</button>`).join('')}</div>
   <label class="pl-sel">管理公司 <select id="vs-co">${opt('', '全部', !f.co)}${cos.map(c => opt(c, coLabel(c), f.co === c)).join('')}</select></label><label class="pl-sel">檢查方 <select id="vs-party">${opt('', '全部', !f.party)}${Object.entries(PSC.VISIT_PARTY).map(([k, l]) => opt(k, k + ' ' + l, f.party === k)).join('')}</select></label><input class="inp" id="vs-q" placeholder="搜尋編號、船名、檢查員、港口" value="${esc(f.q)}" style="max-width:260px"></div></div>
   <div class="vgrid">${list.length ? list.map(x => `<button type="button" class="vcard vfcard${x.stats.overdue ? ' risk-vl' : x.closed ? ' risk-h' : ''}" data-vno="${esc(x.visit_no)}"><span class="mono" style="font-size:12px">${esc(x.visit_no)}${x.sync_status === PSC.SYNC.REVIEW ? ' <span class="flag">待確認</span>' : x.sync_status === PSC.SYNC.DONE && x.src_file_id ? ' <span class="dim" title="登輪系統報告自動建檔">⟳ 自動</span>' : ''}</span><span class="nm">${esc(x.vessel)} ${partyTag(x.party)} <span class="pill cat">${esc(x.vtype)}</span></span><span class="zh">${dfmt(x.date_from)}${x.date_to && x.date_to !== x.date_from ? ' ~ ' + dfmt(x.date_to) : ''}${x.port ? '・' + esc(x.port) : ''}${x.inspector ? '・' + esc(x.inspector) : ''}</span>${vfBar(x.stats)}<span class="st">${vfStatsLine(x.stats)}</span>${(b => b.ok === false ? `<span class="st flag">報告 ${b.report} 項，已登錄 ${b.found} 項</span>` : b.ok ? `<span class="st vr-okt">✓ 與報告 ${b.report} 項相符</span>` : '')(PSC.visitBreakdown(x, x.items))}</button>`).join('') : '<div class="empty">沒有符合條件的訪船紀錄</div>'}</div>`;
@@ -530,9 +530,9 @@ async function autoVirOne(no) {
     const file = new File([b64bytes(f.base64)], f.name || (no + '.pdf'), { type: 'application/pdf' });
     const pages = await pdfTextPages(file), parse = PSC.parseInspectionPages(pages), sm = parse.summary;
     const v = M.visits.find(x => x.visit_no === no), ship = shipByName(sm.vessel);
-    if (sm.defects === null && !parse.defects.length) { await mark(PSC.SYNC.REVIEW, '認不出報告格式（目前支援 FML Paris、V.Ships Shipsure、BSM）'); VSYNC.review.push(no); return true; }
+    if (sm.defects === null && !parse.defects.length) { await mark(PSC.SYNC.REVIEW, '認不出報告格式（目前支援 FML Paris、FML QMS Form B、V.Ships Shipsure、BSM）'); VSYNC.review.push(no); return true; }
     if (v && ship && String(ship.imo || ship.vessel) !== String(v.imo || v.vessel)) { await mark(PSC.SYNC.REVIEW, `報告上的船名 ${sm.vessel} 與訪船編號的船舶 ${v.vessel} 不同`); VSYNC.review.push(no); return true; }
-    const found = parse.defects.length, rep = parse.format === 'SHIPSURE' || parse.format === 'BSM' ? found : sm.defects;
+    const found = parse.defects.length, rep = parse.format === 'SHIPSURE' || parse.format === 'BSM' || parse.format === 'QMS' ? found : sm.defects;
     if (!parse.ok) { await mark(PSC.SYNC.REVIEW, `比對不符：報告 ${rep ?? '?'} 項／讀到 ${found} 項，請人工確認`); VSYNC.review.push(no); return true; }
     const d = new Date(today() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 30);
     const msg = await importVirJob({ file, parse, visitNo: no }, { upd: true, upl: false, defDue: d.toISOString().slice(0, 10) });
@@ -586,7 +586,7 @@ function visitDetail(v, x) {
   const ed = can('editor'), secs = {}; x.items.forEach(it => { if (it.st.status !== VS.CANCELLED) secs[it.section || '其他'] = (secs[it.section || '其他'] || 0) + 1; });
   const facts = [['船舶', `${esc(x.vessel)} <span class="dim">IMO ${esc(x.imo)}</span>`], ['管理公司', esc(coLabel(x.company))], ['檢查方', `${partyTag(x.party)} ${esc(PSC.VISIT_PARTY[x.party] || '')}`], ['類別', esc(x.vtype + ' ' + (PSC.VISIT_TYPE[x.vtype] || ''))], ['登輪期間', `${dfmt(x.date_from)}${x.date_to ? ' ~ ' + dfmt(x.date_to) : ''}`], ['地點', esc(x.port || '—')], ['檢查人員', esc(x.inspector || '—')], ['報告日期', x.report_date ? dfmt(x.report_date) : '—'], ['報告評分', esc(x.score || '—')], ['報告缺失數', x.reported_defects ? `${esc(x.reported_defects)} 項${x.tasks ? '／' + esc(x.tasks) + ' 題' : ''}` : '—'], ['TSL PIC', esc(x.pic || '—')], ['報告連結', x.report_url ? `<a href="${esc(x.report_url)}" target="_blank" rel="noopener">開啟報告</a>` : '—']];
   v.innerHTML = `<button class="backlink" type="button" id="vd-back">← 回到訪船紀錄</button>
-  <div class="card" style="margin-bottom:16px"><div class="vprof-head"><div style="min-width:0"><div class="eyebrow">訪船編號</div><div class="tn-lg">${esc(x.visit_no)}</div></div><div class="btnrow">${ed ? '<button class="btn" type="button" id="vd-edit">編輯訪船資料</button><button class="btn" type="button" id="vd-pdf">上傳 VIR 報告 PDF</button><button class="btn" type="button" id="vd-import">匯入缺失（貼上）</button><button class="btn primary" type="button" id="vd-add">新增一項</button>' : ''}<button class="btn" type="button" id="vd-hist">船舶履歷</button></div></div>
+  <div class="card" style="margin-bottom:16px"><div class="vprof-head"><div style="min-width:0"><div class="eyebrow">訪船編號</div><div class="tn-lg">${esc(x.visit_no)}</div></div><div class="btnrow">${ed ? '<button class="btn" type="button" id="vd-edit">編輯訪船資料</button><button class="btn" type="button" id="vd-pdf">上傳訪船報告（PDF／Excel）</button><button class="btn" type="button" id="vd-import">匯入缺失（貼上）</button><button class="btn primary" type="button" id="vd-add">新增一項</button>' : ''}<button class="btn" type="button" id="vd-hist">船舶履歷</button></div></div>
   <dl class="facts">${facts.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join('')}</dl>
   ${x.note ? `<div class="note" style="white-space:pre-wrap">${esc(x.note)}</div>` : ''}
   <div style="margin-top:12px">${vfBar(x.stats)}<div class="st vf-stl">${vfStatsLine(x.stats)}<span class="dim">${Object.entries(secs).map(([k, n]) => `${esc(k)} ${n}`).join('・')}</span></div></div>
@@ -811,7 +811,17 @@ function bsmBodyReconHTML(job) {
   <ul class="vr-checks">${r.checks.map(x => `<li class="${x.ok ? 'ok' : 'ng'}">${x.ok ? '✓' : '✗'} ${esc(x.label)}${x.detail ? `：<span class="mono">${esc(x.detail)}</span>` : ''}</li>`).join('')}</ul>
   <p class="note" style="margin:6px 0 0">編號 Q章節.題號（例 Q4.23 = 第 4 章 Safety Management 第 23 題）。Not Seen（未檢查）${sm.notSeen || 0} 題不列為缺失。報告沒有寫期限，匯入時套用下方「未寫期限的項目」設定。</p>`;
 }
+/** FML QMS Form B：依 PSC 代碼分類；核對 No. 連號、不重複、QHSE 代碼與 Rectified 一致、期限 */
+function qmsReconHTML(job) {
+  const r = job.parse, sm = r.summary, have = M.vitems.filter(it => it.visit_no === job.visitNo && it.st.status !== VS.CANCELLED), secs = Object.keys(sm.categories);
+  const rect = sec => r.defects.filter(d => d.section === sec && d.rectified).length;
+  return `<div class="tbl-wrap"><table class="vr-t"><thead><tr><th>PSC 代碼分類</th><th class="n">項目</th><th class="n">離船前已改正</th><th class="n">系統已登錄</th></tr></thead><tbody>${secs.map(k => `<tr><td>${esc(k)}</td><td class="n">${sm.categories[k]}</td><td class="n">${rect(k) || '—'}</td><td class="n">${have.filter(it => secKey(it.section) === secKey(k)).length}</td></tr>`).join('')}
+  <tr class="vr-sum"><td>合計</td><td class="n">${r.defects.length}</td><td class="n">${sm.cleared}</td><td class="n">${have.length}</td></tr></tbody></table></div>
+  <ul class="vr-checks">${r.checks.map(c => `<li class="${c.ok ? 'ok' : 'ng'}">${c.ok ? '✓' : '✗'} ${esc(c.label)}${c.detail ? `：<span class="mono">${esc(c.detail)}</span>` : ''}</li>`).join('')}</ul>
+  <p class="note" style="margin:6px 0 0">編號 QHSE-NN 對應表單的 No.；章節依 PSC 代碼分類，PSC 代碼、QHSE 代碼、部門、佐證要求記在「檢查題目」。「Rectified prior disembarking = YES」的項目匯入為<b>待確認</b>（督導離船前已改正），請 PIC 確認後關閉；QHSE 代碼 30（Detainable）標為 High。${sm.source === 'xlsx' ? 'Excel 表單常拆成多個檔案（Page_1、Page_2…），請一次選齊，系統依船名與日期合併成同一次檢查。' : ''}</p>`;
+}
 function virReconHTML(job) {
+  if (job.parse.format === 'QMS') return qmsReconHTML(job);
   if (job.parse.format === 'SHIPSURE') return shipsureReconHTML(job);
   if (job.parse.format === 'BSM') return bsmReconHTML(job);
   const r = job.parse, have = M.vitems.filter(it => it.visit_no === job.visitNo && it.st.status !== VS.CANCELLED);
@@ -831,13 +841,14 @@ function virItemsHTML(job) {
 }
 function virJobHTML(job, i) {
   const r = job.parse, sm = r.summary, ex = M.visits.find(x => x.visit_no === job.visitNo), ves = shipByName(sm.vessel) || (ex && { vessel: ex.vessel });
-  const shp = r.format === 'SHIPSURE', bsm = r.format === 'BSM';
-  const facts = bsm ? [['格式', 'BSM Ship Inspection Report'], ['船舶', esc(sm.vessel || '—') + (sm.imo ? ` <span class="dim">IMO ${esc(sm.imo)}</span>` : '') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查期間', sm.date ? dfmt(sm.date) + (sm.date_to && sm.date_to !== sm.date ? ' ~ ' + dfmt(sm.date_to) : '') : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['主文題數', `${sm.tasks}（評語 ${sm.answered}）`], r.mode === 'body' ? ['擷取缺失', `${r.defects.length}（無附錄缺失單）`] : ['附錄缺失', String(r.defects.length)]]
+  const shp = r.format === 'SHIPSURE', bsm = r.format === 'BSM', qms = r.format === 'QMS';
+  const facts = qms ? [['格式', 'FML QMS（QHSE Form B）' + (sm.source === 'xlsx' ? `・Excel ${sm.files} 個檔案` : '・PDF')], ['船舶', esc(sm.vessel || '—') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查日期', sm.date ? dfmt(sm.date) : '—'], ['QMS 督導', esc(sm.by || '—')], ['船長', esc(sm.master || '—')], ['項目', `${r.defects.length}（${Object.entries(sm.byType || {}).map(([k, v]) => k + ' ' + v).join('、')}）`], ['離船前已改正', `${sm.cleared} / ${r.defects.length}`], ['Detainable', sm.detainable && sm.detainable.length ? `<span class="flag">${sm.detainable.length} 項：${esc(sm.detainable.join('、'))}</span>` : '—']]
+    : bsm ? [['格式', 'BSM Ship Inspection Report'], ['船舶', esc(sm.vessel || '—') + (sm.imo ? ` <span class="dim">IMO ${esc(sm.imo)}</span>` : '') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查期間', sm.date ? dfmt(sm.date) + (sm.date_to && sm.date_to !== sm.date ? ' ~ ' + dfmt(sm.date_to) : '') : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['主文題數', `${sm.tasks}（評語 ${sm.answered}）`], r.mode === 'body' ? ['擷取缺失', `${r.defects.length}（無附錄缺失單）`] : ['附錄缺失', String(r.defects.length)]]
     : shp ? [['格式', 'V.Ships Shipsure'], ['船舶', esc(sm.vessel || '—') + (sm.imo ? ` <span class="dim">IMO ${esc(sm.imo)}</span>` : '') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查期間', sm.date ? dfmt(sm.date) + (sm.date_to && sm.date_to !== sm.date ? ' ~ ' + dfmt(sm.date_to) : '') : '—'], ['檢查人員', esc(sm.by || '—')], ['公司', esc(sm.company || '—')], ['地點', esc(sm.at || '—')], ['類型', esc(sm.type || '—')], ['已清除', `${sm.cleared} / ${r.defects.length}`]]
     : [['格式', 'FML Paris'], ['船舶', esc(sm.vessel || '—') + (ves ? '' : ' <span class="flag">船隊主檔找不到</span>')], ['檢查日期', sm.date ? dfmt(sm.date) : '—'], ['檢查人員', esc(sm.by || '—')], ['地點', esc(sm.at || '—')], ['類型', esc(sm.type || '—')], ['評分', esc(sm.score || '—')], ['報告狀態', sm.status ? esc(sm.status) + (/progress/i.test(sm.status) ? ' <span class="flag">未定稿</span>' : '') : '—']];
-  return `<div class="vr-job" data-job="${i}"><div class="vr-head"><div style="min-width:0"><div class="mono dim" style="font-size:11.5px;word-break:break-all">${esc(job.file.name)}・${r.defects.length ? '' : '<span class="flag">讀不到缺失</span>・'}${MB(job.file.size)}${job.up && job.up.shrunk ? ` → <b class="vr-okt">壓縮後 ${MB(job.up.size)}</b>（照片長邊 ${job.up.max}px，文字不變）` : job.upErr ? ` <span class="flag">${esc(job.upErr)}</span>` : ''}</div>
+  return `<div class="vr-job" data-job="${i}"><div class="vr-head"><div style="min-width:0"><div class="mono dim" style="font-size:11.5px;word-break:break-all">${esc((job.files || [job.file]).map(f => f.name).join('、'))}・${r.defects.length ? '' : '<span class="flag">讀不到缺失</span>・'}${MB((job.files || [job.file]).reduce((a, f) => a + f.size, 0))}${job.up && job.up.shrunk ? ` → <b class="vr-okt">壓縮後 ${MB(job.up.size)}</b>（照片長邊 ${job.up.max}px，文字不變）` : job.upErr ? ` <span class="flag">${esc(job.upErr)}</span>` : ''}</div>
     <div class="vr-no"><label>訪船編號 <input class="inp mono" data-no="${i}" value="${esc(job.visitNo)}"></label>${ex ? `<span class="stp stp-sub">已有紀錄・已登錄 ${M.vitems.filter(it => it.visit_no === ex.visit_no && it.st.status !== VS.CANCELLED).length} 項</span>` : '<span class="stp stp-open">新建訪船紀錄</span>'}</div></div>
-    <span class="vr-badge ${r.ok ? 'ok' : 'ng'}">${shp || bsm ? (r.ok ? `檢查通過・${r.defects.length} 項` : `請檢查・讀到 ${r.defects.length} 項`) : r.ok ? `比對相符 ${r.defects.length} / ${sm.defects}` : `比對不符 ${r.defects.length} / ${sm.defects ?? '?'}`}</span></div>
+    <span class="vr-badge ${r.ok ? 'ok' : 'ng'}">${shp || bsm || qms ? (r.ok ? `檢查通過・${r.defects.length} 項` : `請檢查・讀到 ${r.defects.length} 項`) : r.ok ? `比對相符 ${r.defects.length} / ${sm.defects}` : `比對不符 ${r.defects.length} / ${sm.defects ?? '?'}`}</span></div>
     <dl class="facts">${facts.map(([a, b]) => `<div><dt>${a}</dt><dd>${b}</dd></div>`).join('')}</dl>
     ${/progress/i.test(sm.status || '') ? '<div class="callout" style="margin:0">報告狀態為 In progress（船管尚未定稿），缺失數可能還會變動；定稿後再上傳一次，系統只補新增的項目。</div>' : ''}
     ${virReconHTML(job)}
@@ -848,24 +859,39 @@ async function importVirJob(j, o) {
   const upd = o.upd !== false, upl = !!o.upl, defDue = o.defDue || '';
     const sm = j.parse.summary, ex = M.visits.find(v => v.visit_no === j.visitNo), ship = shipByName(sm.vessel), p = PSC.parseVisitNo(j.visitNo) || {};
     const row = { visit_no: j.visitNo, is_new: !ex };
-    const shp = j.parse.format === 'SHIPSURE' || j.parse.format === 'BSM';
+    const shp = j.parse.format === 'SHIPSURE' || j.parse.format === 'BSM' || j.parse.format === 'QMS', qms = j.parse.format === 'QMS';
     if (!ex) Object.assign(row, { vessel: ship ? ship.vessel : '', party: p.party || 'MGR', vtype: p.vtype || 'VIR', date_from: sm.date || '', date_to: sm.date_to || '' });
     if (!ex || upd) Object.assign(row, { score: sm.score, reported_defects: shp ? j.parse.defects.length : sm.defects ?? '', tasks: sm.tasks ?? '', reported_breakdown: PSC.breakdownText(sm.categories), report_status: sm.status, inspector: (ex && ex.inspector) || [sm.by, shp && sm.company ? '(' + sm.company + ')' : ''].filter(Boolean).join(' '), port: (ex && ex.port) || (shp ? sm.at : [sm.at, sm.type].filter(Boolean).join('（') + (sm.type ? '）' : '')) });
     if (shp && sm.comments && !(ex && ex.note)) row.note = 'V.Ships 檢查意見：' + sm.comments;
+    if (qms && !(ex && ex.note)) row.note = `FML QMS 部門 QHSE 檢查（Form B）${sm.master ? '・船長 ' + sm.master : ''}・離船前已改正 ${sm.cleared} 項` + (sm.detainable && sm.detainable.length ? `・Detainable ${sm.detainable.join('、')}` : '');
     if (ex && !ex.date_from && sm.date) row.date_from = sm.date;
     await api('saveVisit', row);
     const r = await api('importVisitItems', { visit_no: j.visitNo, items: j.parse.defects.map(d => d.due_date || !defDue ? d : Object.assign({}, d, { due_date: defDue })), update_existing: true });
     if (upl && j.upErr) throw new Error(j.upErr + '。可取消勾選「PDF 歸檔到 Drive」只匯入缺失');
     const ub = j.up ? j.up.blob : j.file;
-    if (upl) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: j.file.name, mime: 'application/pdf', size: ub.size, base64: await fileB64(ub), note: (j.parse.format === 'BSM' ? `BSM ${j.parse.defects.length} ${j.parse.mode === 'body' ? 'findings from answers (no deficiency appendix)' : 'deficiencies'} / ${sm.tasks} questions` : j.parse.format === 'SHIPSURE' ? `V.Ships Shipsure ${j.parse.defects.length} findings（${Object.entries(sm.byType || {}).map(([k, v]) => k + ' ' + v).join('、')}）・cleared ${sm.cleared}` : `VIR ${sm.defects ?? '?'} defects / ${sm.tasks ?? '?'} tasks・score ${sm.score || '—'}・${sm.status || ''}`) + (j.up ? shrinkNote(j.up) : '') });
+    if (upl && j.files && j.files.length && !/\.pdf$/i.test(j.files[0].name)) {
+      for (const f of j.files) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: f.name, mime: f.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: f.size, base64: await fileB64(f), note: `FML QMS Form B（Excel ${j.files.length} 個檔案）${j.parse.defects.length} items・rectified ${sm.cleared}` });
+    } else if (upl) await api('uploadDocument', { tracking_no: j.visitNo, doc_type: 'VIR', original_name: j.file.name, mime: 'application/pdf', size: ub.size, base64: await fileB64(ub), note: (qms ? `FML QMS Form B ${j.parse.defects.length} items・rectified prior to disembarking ${sm.cleared}` : j.parse.format === 'BSM' ? `BSM ${j.parse.defects.length} ${j.parse.mode === 'body' ? 'findings from answers (no deficiency appendix)' : 'deficiencies'} / ${sm.tasks} questions` : j.parse.format === 'SHIPSURE' ? `V.Ships Shipsure ${j.parse.defects.length} findings（${Object.entries(sm.byType || {}).map(([k, v]) => k + ' ' + v).join('、')}）・cleared ${sm.cleared}` : `VIR ${sm.defects ?? '?'} defects / ${sm.tasks ?? '?'} tasks・score ${sm.score || '—'}・${sm.status || ''}`) + (j.up ? shrinkNote(j.up) : '') });
   return (`${j.visitNo}：新增 ${r.added.length}${r.skipped ? '、已有 ' + r.skipped : ''}${r.updated && r.updated.length ? '（補齊 ' + r.updated.length + '）' : ''}`);
+}
+/** FML QMS Excel：讀活頁簿各分頁 → PSC.parseQmsWorkbook（認不出回傳 null） */
+async function qmsExcelPart(f) {
+  const X = await loadXlsx(), wb = X.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellDates: true });
+  const sheets = wb.SheetNames.filter(n => !/^PMS Components$/i.test(n)).map(n => ({ name: n, rows: X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: '' }) }));
+  const part = PSC.parseQmsWorkbook(sheets); if (part) part.meta.file = f.name;
+  return part;
+}
+function qmsGuessNo(sm, jobs, self) {
+  const v = shipByName(sm.vessel); if (!v) return '';
+  const taken = M.visits.concat(jobs.filter(j => j !== self).map(j => ({ visit_no: j.visitNo })));
+  return PSC.nextVisitNo(taken, v.vessel, (sm.date || today()).slice(0, 4), 'MGR', 'VIR');
 }
 function virPdfModal(x, pre) {
   const jobs = [];
-  openModal({ title: '上傳 VIR 報告 PDF', sub: x ? esc(x.visit_no) : '自動讀出缺失、比對報告摘要的缺失數，並建立／更新訪船紀錄', wide: true,
-    html: `<div class="form"><label class="vr-drop" id="vr-drop"><input type="file" id="vr-file" accept="application/pdf,.pdf" multiple hidden><b>選擇或拖曳 VIR 報告 PDF</b><span class="dim">可一次多份。檔名開頭若是訪船編號（例 TEH-VICTORY-2026-01-MGR-VIR_VIR Report.pdf）會自動對應${x ? '；否則歸到目前這筆訪船' : '；否則依船名與日期產生新編號'}。支援 FML（Paris）、V.Ships（Shipsure）、BSM 三種報告格式，自動判斷。超過 ${MAX_MB} MB 的 PDF 會自動壓縮照片後歸檔（文字與表格不變）。</span></label>
+  openModal({ title: '上傳訪船報告（PDF／QMS Excel）', sub: x ? esc(x.visit_no) : '自動讀出缺失、比對報告摘要的缺失數，並建立／更新訪船紀錄', wide: true,
+    html: `<div class="form"><label class="vr-drop" id="vr-drop"><input type="file" id="vr-file" accept="application/pdf,.pdf,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden><b>選擇或拖曳訪船報告 PDF 或 FML QMS Excel</b><span class="dim">可一次多份。檔名開頭若是訪船編號（例 TEH-VICTORY-2026-01-MGR-VIR_VIR Report.pdf）會自動對應${x ? '；否則歸到目前這筆訪船' : '；否則依船名與日期產生新編號'}。支援 FML（Paris VIR）、FML QMS（QHSE Form B，PDF 或 Excel；Excel 分成多頁時請一次選齊）、V.Ships（Shipsure）、BSM，自動判斷。超過 ${MAX_MB} MB 的 PDF 會自動壓縮照片後歸檔（文字與表格不變）。</span></label>
       <div id="vr-prog" class="dim" style="font-size:12.5px"></div><div id="vr-jobs"></div>
-      <div id="vr-opts" hidden class="vr-opts"><label><input type="checkbox" id="vr-upd" checked> 以報告內容更新訪船資料（評分、缺失數、章節分布、檢查人員、地點）</label><label><input type="checkbox" id="vr-up" checked> PDF 歸檔到 Drive（文件類別 VIR）</label><label id="vr-due-row" hidden>報告沒寫期限的項目，改善期限設為 <input type="date" class="inp" id="vr-due" style="width:auto;display:inline-block"> <span class="dim">（空白 = 不設期限，不會列入逾期）</span></label></div><div id="vr-err" class="err"></div></div>`,
+      <div id="vr-opts" hidden class="vr-opts"><label><input type="checkbox" id="vr-upd" checked> 以報告內容更新訪船資料（評分、缺失數、章節分布、檢查人員、地點）</label><label><input type="checkbox" id="vr-up" checked> 報告檔歸檔到 Drive（文件類別 VIR）</label><label id="vr-due-row" hidden>報告沒寫期限的項目，改善期限設為 <input type="date" class="inp" id="vr-due" style="width:auto;display:inline-block"> <span class="dim">（空白 = 不設期限，不會列入逾期）</span></label></div><div id="vr-err" class="err"></div></div>`,
     foot: `<button class="btn ghost" type="button" data-close>取消</button><button class="btn primary" type="button" id="vr-go" disabled>匯入</button>`,
     onMount(root, close) {
       const q = s2 => root.querySelector(s2), go = q('#vr-go');
@@ -882,12 +908,25 @@ function virPdfModal(x, pre) {
       const add = async files => {
         q('#vr-err').textContent = '';
         for (const f of files) {
-          if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { q('#vr-err').textContent = f.name + ' 不是 PDF'; continue; }
+          if (/\.(xlsx|xls|xlsm)$/i.test(f.name)) {
+            try {
+              q('#vr-prog').textContent = `讀取 ${f.name}…`;
+              const part = await qmsExcelPart(f);
+              if (!part) { q('#vr-err').textContent = f.name + '：認不出 Excel 格式（目前支援 FML QMS「COMPANY\'S QHSE INSPECTION REPORT（FORM B）」）'; continue; }
+              let job = jobs.find(j => j.parse.format === 'QMS' && j.parts && j.parse.summary.vessel === part.meta.vessel && j.parse.summary.date === part.meta.date);
+              if (job) { if (job.files.some(g => g.name === f.name && g.size === f.size)) { q('#vr-err').textContent = f.name + ' 已經選過'; continue; } job.parts.push(part); job.files.push(f); }
+              else { job = { file: f, files: [f], parts: [part], visitNo: '' }; jobs.push(job); }
+              job.parse = PSC.qmsCombine(job.parts);
+              if (!job.visitNo) job.visitNo = visitNoFromName(f.name) || (x && !jobs.some(j => j !== job && j.visitNo === x.visit_no) ? x.visit_no : '') || qmsGuessNo(job.parse.summary, jobs, job);
+            } catch (e) { q('#vr-err').textContent = f.name + '：' + (e.message || e); }
+            continue;
+          }
+          if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { q('#vr-err').textContent = f.name + ' 不是 PDF 或 Excel'; continue; }
           try {
             q('#vr-prog').textContent = `讀取 ${f.name}…`;
             const pages = await pdfTextPages(f, (i, n) => { q('#vr-prog').textContent = `讀取 ${f.name}：第 ${i} / ${n} 頁`; });
             const parse = PSC.parseInspectionPages(pages), sm = parse.summary;
-            if (sm.defects === null && !parse.defects.length) { q('#vr-err').textContent = f.name + '：認不出報告格式（目前支援 FML Paris、V.Ships Shipsure、BSM），請改用「匯入缺失（貼上）」'; continue; }
+            if (sm.defects === null && !parse.defects.length) { q('#vr-err').textContent = f.name + '：認不出報告格式（目前支援 FML Paris、FML QMS Form B、V.Ships Shipsure、BSM），請改用「匯入缺失（貼上）」'; continue; }
             let no = visitNoFromName(f.name) || (x && !jobs.some(j => j.visitNo === x.visit_no) ? x.visit_no : '');
             if (!no) { const v = shipByName(sm.vessel); if (v) { const taken = M.visits.concat(jobs.map(j => ({ visit_no: j.visitNo }))); no = PSC.nextVisitNo(taken, v.vessel, (sm.date || today()).slice(0, 4), 'MGR', 'VIR'); } }
             const job = { file: f, parse, visitNo: no };
@@ -928,7 +967,7 @@ function visitReconHTML(x) {
   const st = b.ok ? 'ok' : 'ng';
   return `<div class="vr-panel ${st}"><div class="vr-ph"><b>報告缺失數比對</b><span class="vr-badge ${st}">${b.ok ? '相符' : '不符'}：報告 ${b.report ?? '?'} 項／已登錄 ${b.found} 項</span>${x.tasks ? `<span class="dim">檢查題數 ${esc(x.tasks)}</span>` : ''}${x.report_status ? `<span class="dim">報告狀態 ${esc(x.report_status)}</span>` : ''}</div>
   ${b.hasBreakdown ? `<div class="vr-chips">${b.rows.map(r => `<span class="vr-chip ${r.diff === null ? 'x' : r.diff ? 'ng' : 'ok'}">${esc(r.section)} <b class="num">${r.found}</b>${r.report === null ? '<i>報告未列</i>' : `<i>/ ${r.report}</i>`}</span>`).join('')}</div>` : ''}
-  ${b.ok === false ? `<p class="note" style="margin:6px 0 0">${b.found < (b.report || 0) ? `還差 ${b.report - b.found} 項。` : b.found > (b.report || 0) ? `多 ${b.found - b.report} 項（可能重複登錄或報告後補列）。` : '總數相同但章節分布不同，請檢查章節。'}上傳 VIR 報告 PDF 可自動補齊。</p>` : ''}
+  ${b.ok === false ? `<p class="note" style="margin:6px 0 0">${b.found < (b.report || 0) ? `還差 ${b.report - b.found} 項。` : b.found > (b.report || 0) ? `多 ${b.found - b.report} 項（可能重複登錄或報告後補列）。` : '總數相同但章節分布不同，請檢查章節。'}上傳訪船報告（PDF／Excel）可自動補齊。</p>` : ''}
   ${/progress/i.test(x.report_status || '') ? '<p class="note flag" style="margin:4px 0 0">報告仍是 In progress（未定稿），定稿後請再上傳一次比對。</p>' : ''}</div>`;
 }
 function visitItemModal(id) {

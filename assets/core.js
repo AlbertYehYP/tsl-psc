@@ -9,7 +9,7 @@
 var PSC = (function () {
   'use strict';
 
-  var VERSION = '1.18.0';
+  var VERSION = '1.19.0';
 
   /* ---------------- reference data ---------------- */
   var TIERS = {
@@ -1484,8 +1484,164 @@ var PSC = (function () {
       ok: out.length > 0 && checks.every(function (c) { return c.ok; }) };
   }
   /** 依報告版面選擇解析器：FML Paris VIR、V.Ships Shipsure、BSM */
+  /* ---------------- FML QMS 部門 QHSE 檢查報告（COMPANY'S QHSE INSPECTION REPORT FORM B，表單 QMS 106A；v1.19）----------------
+   * 兩種來源：PDF（parseQmsPages，依 pdf.js 座標切欄）、Excel（parseQmsWorkbook，表單分頁 QMS 106A；同一次檢查常拆成數個 Page_N.xlsx）。
+   * 兩者先轉成「部分結果」{ meta, rows }，再由 qmsCombine 合併、核對（No. 連號、不重複、QHSE 代碼與 Rectified 一致、未改正項目有期限、船名日期一致）。 */
+  var QMS_PSC = { '11': 'Certificates - Ship Certificates', '12': 'Certificates - Crew Certificates', '13': 'Certificates - Documents', '21': 'Structural Conditions',
+    '31': 'Water/Weathertight Conditions', '41': 'Emergency Systems', '51': 'Radio Communications', '61': 'Cargo Operations incl. Equipment', '71': 'Fire Safety', '81': 'Alarms',
+    '91': 'Living Conditions', '92': 'Working Conditions', '101': 'Safety of Navigation', '111': 'Life Saving Appliances', '121': 'Dangerous Goods', '131': 'Propulsion & Auxiliary Machinery',
+    '141': 'Pollution Prevention (MARPOL)', '151': 'ISM', '161': 'ISPS', '171': 'Other', '991': 'Other', '181': 'MLC - Minimum Requirements for Seafarers', '182': 'MLC - Conditions of Employment',
+    '183': 'MLC - Accommodation, Recreation, Food & Catering', '184': 'MLC - Health, Medical Care, Welfare' };
+  var QMS_QHSE = { '30': 'Detainable deficiency', '17': 'Rectify before departure', '16': 'Rectify within 14 days', '15': 'Rectify next port', '18': 'Rectify within 3 months', '10': 'Deficiency rectified', '99': 'Others / observation' };
+  function qmsSection(code) { var n = parseInt(s(code), 10); if (isNaN(n)) return ''; if (n >= 141 && n <= 147) return QMS_PSC['141']; return QMS_PSC[String(n)] || ''; }
+  function qmsQhseText(code) { return s(code).split(/\s*\/\s*/).map(function (c) { return QMS_QHSE[c] ? c + ' ' + QMS_QHSE[c] : c; }).join(' / '); }
+  /** 日期：Excel 的 Date、Excel 序號、yyyy-mm-dd、10 NOV 2026、14-Dec-26；NA／空白回傳 '' */
+  function qmsDate(v) {
+    if (v && typeof v === 'object' && typeof v.getFullYear === 'function') return isNaN(v.getTime()) ? '' : v.getFullYear() + '-' + pad2(v.getMonth() + 1) + '-' + pad2(v.getDate());
+    if (typeof v === 'number' && v > 20000 && v < 80000) { var d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000); return d.toISOString().slice(0, 10); }
+    var t = s(v), m; if (!t || /^(N\/?A|NIL|-+)$/i.test(t)) return '';
+    var a = isoDate(t) || parseAnyDate(t); if (a) return a;
+    if ((m = t.match(/^(\d{1,2})[\s\-\/]([A-Za-z]{3})[a-z]*[\s\-\/](\d{2})$/)) && MON_IDX[up(m[2])]) return '20' + m[3] + '-' + pad2(MON_IDX[up(m[2])]) + '-' + pad2(+m[1]);
+    return '';
+  }
+  function qmsYes(v) { return /^Y(ES)?$/i.test(s(v)); }
+  /** Excel：sheets = [{ name, rows }]，rows 為 SheetJS sheet_to_json(header:1, raw:true, cellDates:true) 的二維陣列。認不出回傳 null */
+  function parseQmsWorkbook(sheets) {
+    var sh = (sheets || []).filter(function (x) { return (x.rows || []).some(function (r) { return /QHSE INSPECTION REPORT/i.test((r || []).join(' ')); }); })[0];
+    if (!sh) return null;
+    var rows = sh.rows, meta = { vessel: '', date: '', by: '', master: '', source: 'xlsx', sheet: sh.name }, hdr = -1, col = {}, out = [];
+    var cellAfter = function (r, i) { for (var j = i + 1; j < r.length; j++) if (s(r[j])) return r[j]; return ''; };
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i] || [], first = s(r[0]), line = r.map(s).join(' ');
+      if (/^Vessel\s*:/i.test(first)) { meta.vessel = up(s(first.replace(/^Vessel\s*:\s*/i, '')) || s(cellAfter(r, 0))); continue; }
+      if (/^Date\s*:/i.test(first) && !meta.date) { meta.date = qmsDate(s(first.replace(/^Date\s*:\s*/i, '')) || cellAfter(r, 0)); continue; }
+      if (/^QMS Dept\.? Supdt/i.test(first)) {
+        r.forEach(function (c, j) { var v = s(c); if (!v || j === 0) return; if (/^Master\b/i.test(v)) meta.master = s(v.replace(/^Master\s*:?\s*/i, '')); else if (!meta.by) meta.by = v; });
+        continue;
+      }
+      if (hdr < 0 && /^No\.?$/i.test(first) && /Deficiency/i.test(line)) {
+        hdr = i;
+        r.forEach(function (c, j) { var h = s(c);
+          if (/^No\.?$/i.test(h)) col.no = j; else if (/^QHSE/i.test(h)) col.qhse = j; else if (/^Deficiency/i.test(h)) col.finding = j; else if (/^PSC/i.test(h)) col.psc = j;
+          else if (/^Observation/i.test(h)) col.ftype = j; else if (/^PMS/i.test(h)) col.pms = j; else if (/^Dept/i.test(h)) col.dept = j; else if (/^Rectified/i.test(h)) col.rect = j;
+          else if (/^Suggested/i.test(h)) col.action = j; else if (/^Evidence/i.test(h)) col.evidence = j; else if (/^Due/i.test(h)) col.due = j; });
+        continue;
+      }
+      if (hdr < 0) continue;
+      if (/^(PSC Code|QHSE Code)\s*:/i.test(first)) { hdr = -2; continue; }
+      if (hdr === -2) continue;
+      var no = r[col.no], g = function (k) { return col[k] === undefined ? '' : r[col[k]]; };
+      if (!/^\d{1,3}$/.test(s(no)) || !s(g('finding'))) continue;
+      out.push({ no: +s(no), qhse: s(g('qhse')), finding: s(g('finding')).replace(/\s+/g, ' '), psc: s(g('psc')), ftype: s(g('ftype')), pms: s(g('pms')).replace(/ /g, ' ').trim(), dept: s(g('dept')),
+        rect: s(g('rect')), action: s(g('action')), evidence: s(g('evidence')), due: qmsDate(g('due')), due_raw: s(g('due') instanceof Date ? qmsDate(g('due')) : g('due')), page: sh.name });
+    }
+    if (hdr === -1 && !out.length) return null;
+    return { meta: meta, rows: out };
+  }
+  /** PDF：依表頭欄位位置切欄；每頁遇到簽名欄（SUPT NAME／QMS Dept. Supdt.）或代碼說明（PSC Code :）就停，下一頁要再看到表頭或延續的資料列 */
+  function parseQmsPages(pages) {
+    var meta = { vessel: '', date: '', by: '', master: '', source: 'pdf' }, cols = null, out = [], ended = false;
+    var KEYS = [['no', /^No\.$/], ['qhse', /^QHSE$/], ['finding', /^Deficiency \/ Observation$/], ['psc', /^PSC$/], ['ftype', /^Observation\/?D?$/], ['pms', /^PMS Components$/], ['dept', /^Dept\.?$/],
+      ['rect', /^Rectified prior$/], ['action', /^Suggested corrective action$/i], ['evidence', /^Evidence$/], ['due', /^Due Date$/]];
+    (pages || []).forEach(function (pg) {
+      var items = (pg.items || []).filter(function (t) { return s(t.str); }).map(function (t) { return { str: s(t.str), x: t.x, y: t.y, w: t.w || 0 }; });
+      var line = function (it) { return items.filter(function (o) { return Math.abs(o.y - it.y) < 3 && o.x > it.x; }).sort(function (a, b) { return a.x - b.x; }); };
+      items.forEach(function (it) {
+        var m;
+        if ((m = it.str.match(/^Vessel\s*:\s*(.*)$/i)) && !meta.vessel) meta.vessel = up(s(m[1]) || (line(it)[0] || {}).str || '');
+        else if ((m = it.str.match(/^M\.?V\.?\s*\.?:\s*(.+)$/i)) && !meta.vessel) meta.vessel = up(m[1]);
+        else if ((m = it.str.match(/^Date\s*:\s*(.*)$/i)) && !meta.date) meta.date = qmsDate(s(m[1]) || (line(it)[0] || {}).str || '');
+        else if ((m = it.str.match(/^SUPT NAME\s*:\s*(.*)$/i)) && !meta.by) meta.by = s(m[1]) || s((line(it)[0] || {}).str);
+        else if ((m = it.str.match(/^MASTER NAME\s*:\s*(.*)$/i)) && !meta.master) meta.master = s(m[1]) || s((line(it)[0] || {}).str);
+        else if (/^QMS Dept\.? Supdt/i.test(it.str) && !meta.by) { var nx = line(it).filter(function (o) { return !/^Master/i.test(o.str); })[0]; if (nx) meta.by = nx.str; }
+        else if ((m = it.str.match(/^Master\s+(Capt.+)$/i)) && !meta.master) meta.master = s(m[1]);
+      });
+      // 表頭
+      var hNo = items.filter(function (t) { return /^No\.$/.test(t.str); })[0], hDue = items.filter(function (t) { return /^Due Date$/.test(t.str); })[0];
+      var top = -1;
+      if (hNo && hDue && Math.abs(hNo.y - hDue.y) < 20) {
+        cols = {}; KEYS.forEach(function (k) { var h = items.filter(function (t) { return k[1].test(t.str) && Math.abs(t.y - hNo.y) < 20; })[0]; if (h) cols[k[0]] = { l: h.x, r: h.x + h.w }; });
+        // 兩行表頭的第二行（Code、CODE、efect、disembarking、required）擴大欄寬
+        items.forEach(function (t) { if (t.y > hNo.y - 12 && t.y < hNo.y + 14) KEYS.forEach(function (k) { var c = cols[k[0]]; if (c && t.x < c.r + 4 && t.x + t.w > c.l - 4) { c.l = Math.min(c.l, t.x); c.r = Math.max(c.r, t.x + t.w); } }); });
+        top = hNo.y + 12; ended = false;
+      }
+      if (!cols || !cols.no || !cols.finding || !cols.psc) return;
+      if (ended && top < 0) return;
+      var stopY = Infinity;
+      items.forEach(function (t) { if (t.y > top && /^(SUPT NAME|PSC Code\s*:|QHSE Code\s*:|QMS Dept\.? Supdt|MASTER NAME)/i.test(t.str)) stopY = Math.min(stopY, t.y); });
+      var colOf = function (t) {
+        var c = cols, L = t.x, R = t.x + t.w;
+        if (c.qhse && L > c.qhse.r + 4 && L < c.psc.l - 6) return 'finding';
+        var best = '', bo = 0, bd = Infinity;
+        Object.keys(c).forEach(function (k) { if (k === 'finding') return; var o = Math.min(R, c[k].r + 6) - Math.max(L, c[k].l - 6), d = Math.abs((L + R) / 2 - (c[k].l + c[k].r) / 2); if (o > bo) { bo = o; best = k; } else if (!bo && d < bd) { bd = d; if (!best || !bo) best = k; } });
+        if (best === 'rect' && !/^(YES|NO|N\/?A)$/i.test(t.str) && c.action) best = 'action';
+        return best;
+      };
+      var body = items.filter(function (t) { return t.y > top && t.y < stopY - 2; }).map(function (t) { return { t: t, c: colOf(t) }; });
+      var anchors = body.filter(function (b) { return b.c === 'no' && /^\d{1,3}$/.test(b.t.str); }).filter(function (b) {
+        return body.some(function (o) { return Math.abs(o.t.y - b.t.y) < 3 && (o.c === 'ftype' && /observation|defect/i.test(o.t.str) || o.c === 'rect' && /^(YES|NO)$/i.test(o.t.str)); });
+      }).sort(function (a, b) { return a.t.y - b.t.y; });
+      if (!anchors.length) { if (stopY < Infinity) ended = true; return; }
+      var gap = anchors.length > 1 ? (anchors[anchors.length - 1].t.y - anchors[0].t.y) / (anchors.length - 1) : 46;
+      var rows = anchors.map(function (a) { return { no: +a.t.str, y: a.t.y, cells: {} }; });
+      body.forEach(function (b) {
+        if (b.c === 'no' && /^\d{1,3}$/.test(b.t.str)) return;
+        var best = null, bd = Infinity; rows.forEach(function (r) { var d = Math.abs(r.y - b.t.y); if (d < bd) { bd = d; best = r; } });
+        if (!best || bd > gap * 0.62) return;
+        (best.cells[b.c] = best.cells[b.c] || []).push(b.t);
+      });
+      rows.forEach(function (r) {
+        var txt = function (k) { return (r.cells[k] || []).sort(function (a, b) { return a.y - b.y || a.x - b.x; }).map(function (t) { return t.str; }).join(' ').replace(/\s+/g, ' ').trim(); };
+        out.push({ no: r.no, qhse: txt('qhse'), finding: txt('finding'), psc: txt('psc'), ftype: txt('ftype'), pms: txt('pms'), dept: txt('dept'), rect: txt('rect'), action: txt('action'), evidence: txt('evidence'), due: qmsDate(txt('due')), due_raw: txt('due'), page: pg.page });
+      });
+      if (stopY < Infinity) ended = true;
+    });
+    return { meta: meta, rows: out };
+  }
+  /** 合併部分結果並核對；回傳與其他格式相同的結構 { format:'QMS', summary, defects, checks, ok, ... } */
+  function qmsCombine(parts) {
+    parts = (parts || []).filter(Boolean);
+    var meta = { vessel: '', date: '', by: '', master: '' }, rows = [], vessels = {}, dates = {};
+    parts.forEach(function (p) { ['vessel', 'date', 'by', 'master'].forEach(function (k) { if (!meta[k] && p.meta[k]) meta[k] = p.meta[k]; }); if (p.meta.vessel) vessels[p.meta.vessel] = 1; if (p.meta.date) dates[p.meta.date] = 1; rows = rows.concat(p.rows); });
+    rows.sort(function (a, b) { return a.no - b.no; });
+    var seen = {}, dup = [], nums = rows.map(function (r) { return r.no; }), max = nums.length ? Math.max.apply(null, nums) : 0, missing = [], badCode = [], rectMis = [], noDue = [], noPsc = [];
+    rows.forEach(function (r) { if (seen[r.no]) dup.push(r.no); seen[r.no] = 1; });
+    for (var n = 1; n <= max; n++) if (!seen[n]) missing.push(n);
+    var defects = rows.filter(function (r, i) { return !i || rows[i - 1].no !== r.no; }).map(function (r) {
+      var yes = qmsYes(r.rect), codes = s(r.qhse).split(/\s*\/\s*/), sec = qmsSection(r.psc);
+      if (!sec) noPsc.push(r.no);
+      if (codes.some(function (c) { return c && !QMS_QHSE[c]; })) badCode.push(r.no + '（' + r.qhse + '）');
+      if (s(r.qhse) && (codes.indexOf('10') >= 0) !== yes) rectMis.push(r.no);
+      if (!yes && !r.due) noDue.push(r.no);
+      return { ref: 'QHSE-' + pad2(r.no), section: sec || ('PSC ' + (s(r.psc) || '—')), area: s(r.pms), ftype: s(r.ftype) || 'Observation',
+        question: ['QHSE ' + qmsQhseText(r.qhse), r.psc ? 'PSC ' + r.psc : '', r.dept ? 'Dept. ' + r.dept : '', r.evidence && !/^not required$/i.test(r.evidence) ? 'Evidence: ' + r.evidence : ''].filter(Boolean).join('｜'),
+        finding: s(r.finding), action_required: yes ? '' : s(r.action), due: r.due_raw, due_date: r.due || (yes ? meta.date : ''),
+        cleared_date: yes ? (meta.date || '') : '', cleared_by: yes ? 'Rectified prior to disembarking' : '', action_note: yes ? s(r.action) : '',
+        rectified: yes, qhse: s(r.qhse), dept: s(r.dept), evidence: s(r.evidence), page: r.page, pms_code: s(r.pms), psc_code: s(r.psc), viq_code: '', score: '', risk: codes.indexOf('30') >= 0 ? 'High' : '' };
+    });
+    var cats = {}, byType = {}; defects.forEach(function (d) { cats[d.section] = (cats[d.section] || 0) + 1; byType[d.ftype] = (byType[d.ftype] || 0) + 1; });
+    var vs = Object.keys(vessels), ds = Object.keys(dates);
+    var checks = [
+      { key: 'seq', label: 'No. 1–' + max + ' 連號', ok: !missing.length && defects.length === max, detail: missing.length ? '缺 ' + missing.join('、') : '' },
+      { key: 'dup', label: '編號不重複', ok: !dup.length, detail: dup.length ? '重複 ' + dup.join('、') + (parts.length > 1 ? '（是否重複上傳同一頁？）' : '') : '' },
+      { key: 'rect', label: 'QHSE 代碼與「Rectified prior disembarking」一致（含 10 ＝已改正）', ok: !rectMis.length, detail: rectMis.length ? 'No. ' + rectMis.join('、') : '' },
+      { key: 'due', label: '未改正項目都有期限', ok: !noDue.length, detail: noDue.length ? 'No. ' + noDue.join('、') + '（匯入時套用預設期限）' : '' },
+      { key: 'psc', label: 'PSC 代碼都認得', ok: !noPsc.length, detail: noPsc.length ? 'No. ' + noPsc.join('、') : '' }
+    ];
+    if (parts.length > 1) checks.push({ key: 'same', label: parts.length + ' 個檔案為同一次檢查（船名、日期相同）', ok: vs.length <= 1 && ds.length <= 1, detail: vs.length > 1 || ds.length > 1 ? vs.join('／') + ' ' + ds.join('／') : '' });
+    if (badCode.length) checks.push({ key: 'code', label: 'QHSE 代碼都在表單說明內', ok: false, detail: 'No. ' + badCode.join('、') });
+    var sum = { format: 'QMS', vessel: meta.vessel, imo: '', date: meta.date, date_to: '', by: meta.by, master: meta.master, company: 'FML QMS', at: '', type: "Company's QHSE Inspection (Form B)",
+      defects: max || null, tasks: null, score: '', status: '', categories: cats, byType: byType, cleared: defects.filter(function (d) { return d.rectified; }).length,
+      files: parts.length, source: parts.map(function (p) { return p.meta.source; })[0] || '', detainable: defects.filter(function (d) { return d.risk === 'High'; }).map(function (d) { return d.ref; }) };
+    var rec = Object.keys(cats).map(function (k) { return { section: k, report: cats[k], found: cats[k] }; });
+    return { format: 'QMS', summary: sum, defects: defects, detailDefects: [], onlyInDetail: [], reconcile: rec, checks: checks,
+      ok: defects.length > 0 && checks.every(function (c) { return c.ok || c.key === 'due' || c.key === 'psc'; }) };
+  }
+  function isQmsPages(pages) { return (pages || []).slice(0, 2).some(function (p) { return (p.items || []).some(function (t) { return /QHSE INSPECTION REPORT/i.test(t.str); }); }); }
+
   function parseInspectionPages(pages) {
     var head = (pages || []).slice(0, 2).map(function (p) { return (p.items || []).map(function (t) { return t.str; }).join(' '); }).join(' ');
+    if (isQmsPages(pages)) return qmsCombine([parseQmsPages(pages)]);
     if (/Shipsure Version|INSPECTION SUMMARY/.test(head) && /Ves\. Ref\. No\./.test(head)) return parseShipsurePages(pages);
     if (/Ship Inspection Report/i.test(head) && (/INSPECTED AT/.test(head) && /Prepared By/.test(head) || (pages || []).some(function (p) { return (p.items || []).some(function (t) { return /SUPERINTENDENT VESSEL INSPECTION|BERNHARD SCHULTE/.test(t.str); }); }))) return parseBsmPages(pages);
     var r = parseVirPages(pages); r.format = 'PARIS'; r.summary.format = 'PARIS'; return r;
@@ -2802,7 +2958,7 @@ var PSC = (function () {
     deadlines: deadlines, pscTier: pscTier, vesselAt: vesselAt, handle: handle,
     BRIBE_FIELDS: BRIBE_FIELDS, parseBribe: parseBribe, bribeFlag: bribeFlag, canBribe: canBribe, num: num,
     SRP_WINDOW: SRP_WINDOW, addMonths: addMonths, daysBetween: daysBetween, listOf: listOf, tmouWindow: tmouWindow, estimateSRP: estimateSRP,
-    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, SYNC: SYNC, evidenceDocs: evidenceDocs, UPD_STAGES: UPD_STAGES, UPD_CHANNELS: UPD_CHANNELS, MGR_ORIGIN: MGR_ORIGIN, UPD_REJECTED: UPD_REJECTED, UPD_ACKED: UPD_ACKED, MGR_CHANNEL: MGR_CHANNEL, MGR_STAGE_EN: MGR_STAGE_EN, CO_EN: CO_EN, DOC_DELETED: DOC_DELETED, utcMinute: utcMinute, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
+    currentVessels: currentVessels, windowReport: windowReport, normalizeRow: normalizeRow, validateData: validateData, NK_FIELDS: NK_FIELDS, parseFleetFile: parseFleetFile, perfIndex: perfIndex, tmouAvg: tmouAvg, VSTATUS: VSTATUS, VISIT_PARTY: VISIT_PARTY, VISIT_TYPE: VISIT_TYPE, VIR_SECTIONS: VIR_SECTIONS, parseVisitNo: parseVisitNo, nextVisitNo: nextVisitNo, parseVisitItems: parseVisitItems, parseVirPages: parseVirPages, parseShipsurePages: parseShipsurePages, parseBsmPages: parseBsmPages, shipDossier: shipDossier, parseDelimited: parseDelimited, guessPortColumns: guessPortColumns, portRecordsFrom: portRecordsFrom, statsFromRows: statsFromRows, SYNC: SYNC, evidenceDocs: evidenceDocs, UPD_STAGES: UPD_STAGES, UPD_CHANNELS: UPD_CHANNELS, MGR_ORIGIN: MGR_ORIGIN, UPD_REJECTED: UPD_REJECTED, UPD_ACKED: UPD_ACKED, MGR_CHANNEL: MGR_CHANNEL, MGR_STAGE_EN: MGR_STAGE_EN, CO_EN: CO_EN, DOC_DELETED: DOC_DELETED, utcMinute: utcMinute, portProfile: portProfile, MOU_DATA: MOU_DATA, mouChecks: mouChecks, mouStatsRows: mouStatsRows, parseMouAnnual: parseMouAnnual, pagesToText: pagesToText, mouLatest: mouLatest, mouReference: mouReference, mouIndexLatest: mouIndexLatest, mouPdfFromPage: mouPdfFromPage, mouCountry: mouCountry, mouCatZh: mouCatZh, CATEGORY_TIPS: CATEGORY_TIPS, vesselSeries: vesselSeries, teuBand: teuBand, teuBands: teuBands, ageBand: ageBand, rollingPscSeries: rollingPscSeries, rollingIncSeries: rollingIncSeries, quarterList: quarterList, portMatch: portMatch, portMain: portMain, setPortAliases: setPortAliases, saveRightShip: saveRightShip, DOSSIER_LEVELS: DOSSIER_LEVELS, parseInspectionPages: parseInspectionPages, parseQmsPages: parseQmsPages, parseQmsWorkbook: parseQmsWorkbook, qmsCombine: qmsCombine, qmsDate: qmsDate, QMS_PSC: QMS_PSC, QMS_QHSE: QMS_QHSE, visitBreakdown: visitBreakdown, breakdownText: breakdownText, parseAnyDate: parseAnyDate, visitItemState: visitItemState, visitStats: visitStats, virSection: virSection, isoWeek: isoWeek, periodOf: periodOf, periodReport: periodReport, incRiskCfg: incRiskCfg, incidentScore: incidentScore, incRiskLevel: incRiskLevel, incidentRisk: incidentRisk, linFit: linFit, trendSummary: trendSummary, inspScore: inspScore, inspTrendPoints: inspTrendPoints, quarterTrendPoints: quarterTrendPoints, quarterIncidentPoints: quarterIncidentPoints, yearFrac: yearFrac, DEFAULT_TEMPLATES: DEFAULT_TEMPLATES, templatesOf: templatesOf, replyStage: replyStage, replyVars: replyVars, fillTemplate: fillTemplate, pendingMarks: pendingMarks, enDate: enDate, flagPerf: flagPerf, roPerf: roPerf, flagKey: flagKey, roKey: roKey, nameList: nameList, sameNK: sameNK,
     TOKYO: TOKYO, TAIWAN_PSC: TAIWAN_PSC, TW_PORTS: TW_PORTS, twPort: twPort, MOU_NAMES: MOU_NAMES, DEFAULT_MOU: DEFAULT_MOU, normCountry: normCountry, resolveMOU: resolveMOU, isTokyo: isTokyo,
     incidentDeadlines: incidentDeadlines, csvRows: csvRows, parseRiskCSV: parseRiskCSV,
     DEFAULT_RULES: DEFAULT_RULES, RULESET_DEFAULT: RULESET_DEFAULT, rulesAt: rulesAt, ruleDeadlines: ruleDeadlines, suggestMajor: suggestMajor,
